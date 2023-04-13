@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "givenergy-cli"
+version = "0.1.0"
+description = "Command-line interface to control GivEnergy systems via the local network"
+authors = ["Dewet Diener <givenergy-modbus@dewet.org>"]
+license = "Apache-2.0"
+readme = "README.md"
+#packages = [{include = "givenergy_cli"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+typer = {extras = ["all"], version = "^0.7.0"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.3.0"
+
+[tool.poetry.scripts]
+givenergy-cli = 'givenergy-cli:main'
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
