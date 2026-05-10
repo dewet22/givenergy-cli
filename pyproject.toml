@@ -5,17 +5,20 @@ description = "Command-line interface to control GivEnergy systems via the local
 authors = ["Dewet Diener <givenergy-modbus@dewet.org>"]
 license = "Apache-2.0"
 readme = "README.md"
-#packages = [{include = "givenergy_cli"}]
+packages = [{include = "givenergy_cli"}]
 
 [tool.poetry.dependencies]
-python = "^3.8"
-typer = {extras = ["all"], version = "^0.7.0"}
+python = ">=3.13,<4.0"
+givenergy-modbus = "^1.1.0"
+typer = {extras = ["all"], version = "^0.25.1"}
+textual = "^8.2.5"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.3.0"
+pytest = "^9.0.0"
+ruff = "^0.15.12"
 
 [tool.poetry.scripts]
-givenergy-cli = 'givenergy-cli:main'
+givenergy-cli = 'givenergy_cli.__main__:app'
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__semble__search",
+      "mcp__semble__find_related",
+      "Bash(poetry install *)",
+      "Bash(poetry add *)",
+      "Bash(poetry run *)"
+    ]
+  }
+}
