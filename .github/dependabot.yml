@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Python deps from pyproject.toml + uv.lock.
+  # Restrict to direct deps so transitive churn doesn't generate update PRs.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip-direct:
+        patterns: ["*"]
+    allow:
+      - dependency-type: "direct"
+
+  # Pin GitHub Actions versions; quiet cadence since these rarely change.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
