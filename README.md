@@ -5,23 +5,23 @@ A terminal UI for monitoring and controlling GivEnergy inverters over the local 
 ## Requirements
 
 - Python 3.13+
-- A GivEnergy inverter accessible on the local network (default: `192.168.44.50:8899`)
+- A GivEnergy inverter accessible on the local network
 
 ## Installation
 
 ```bash
-poetry install
+uv sync
 ```
 
 ## Usage
 
 ```bash
-poetry run givenergy-cli
-poetry run givenergy-cli --host 192.168.x.x
-poetry run givenergy-cli --host 192.168.x.x --port 8899
+uv run givenergy-cli
+uv run givenergy-cli --host 192.168.x.x
+uv run givenergy-cli --host 192.168.x.x --port 8899
 ```
 
-After `poetry install` the `givenergy-cli` command is available directly without the `poetry run` prefix.
+After `uv sync` the `givenergy-cli` command is available directly inside the venv (`.venv/bin/givenergy-cli`) without the `uv run` prefix.
 
 ### Key bindings
 
