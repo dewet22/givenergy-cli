@@ -2,6 +2,9 @@ version = 1
 revision = 3
 requires-python = ">=3.13, <4.0"
 
+[options]
+prerelease-mode = "disallow"
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"

@@ -27,3 +27,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["givenergy_cli"]
+
+[tool.uv]
+prerelease = "disallow"
