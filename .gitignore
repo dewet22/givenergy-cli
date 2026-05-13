@@ -131,3 +131,7 @@ dmypy.json
 
 # PyCharm
 .idea/
+
+# Claude Code — local-only, not shared
+.claude/settings.local.json
+.claude/worktrees/
