@@ -22,11 +22,11 @@ from textual.widgets import (
 )
 
 from givenergy_modbus.client.client import Client
-from givenergy_modbus.model.inverter import Inverter
+from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
 # Getter signature: (inverter, plant) -> display string
-Getter = Callable[[Inverter, Plant], str]
+Getter = Callable[[SinglePhaseInverter, Plant], str]
 
 
 def _fmt_slot(slot) -> str:

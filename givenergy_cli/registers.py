@@ -13,7 +13,7 @@ from rich.table import Table
 
 from givenergy_modbus.client.client import Client
 from givenergy_modbus.model.battery import Battery, BatteryRegisterGetter
-from givenergy_modbus.model.inverter import Inverter
+from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 from givenergy_modbus.model.register import Register
 from givenergy_modbus.model.register_cache import RegisterCache
@@ -139,7 +139,7 @@ def load_plant(path: Path) -> Plant:
     )
 
 
-def _model_table(title: str, model: Inverter | Battery) -> Table:
+def _model_table(title: str, model: SinglePhaseInverter | Battery) -> Table:
     table = Table(
         title=title, show_header=True, header_style="bold magenta", expand=True
     )
