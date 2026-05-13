@@ -1,6 +1,12 @@
-# givenergy-cli
+# GivEnergy CLI
 
-A CLI for monitoring and exporting data from GivEnergy inverters over the local network, built on [`givenergy-modbus`](https://github.com/dewet22/givenergy-modbus).
+<p align="center"><img src="logo.png" alt="GivEnergy" width="320"></p>
+
+<!-- [![CI](https://img.shields.io/github/checks-status/dewet22/givenergy-cli/main)](https://github.com/dewet22/givenergy-cli/actions?query=branch%3Amain) -->
+[![license](https://img.shields.io/github/license/dewet22/givenergy-cli)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+A command-line tool for monitoring and exporting data from GivEnergy inverters over the local network, built on [`givenergy-modbus`](https://github.com/dewet22/givenergy-modbus).
 
 ## Requirements
 
