@@ -22,6 +22,7 @@ from textual.widgets import (
 )
 
 from givenergy_modbus.client.client import Client
+from givenergy_modbus.exceptions import CommunicationError
 from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
@@ -202,7 +203,9 @@ class ConnectionStatus(Label):
 
     SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-    # None = connecting, True = connected, False = disconnected, "timeout" = refresh timed out
+    # None = connecting, "probing" = running detect/load_config/refresh on startup,
+    # "reconnecting" = attempting to re-establish after a drop, True = connected,
+    # False = disconnected, "timeout" = refresh timed out
     connected: reactive[bool | None | str] = reactive(None)
     _frame: reactive[int] = reactive(0)
 
@@ -221,6 +224,14 @@ class ConnectionStatus(Label):
         if self.connected is None:
             self.update(
                 f"[yellow]{self.SPINNER_FRAMES[self._frame]}[/yellow] Connecting..."
+            )
+        elif self.connected == "probing":
+            self.update(
+                f"[yellow]{self.SPINNER_FRAMES[self._frame]}[/yellow] Probing..."
+            )
+        elif self.connected == "reconnecting":
+            self.update(
+                f"[yellow]{self.SPINNER_FRAMES[self._frame]}[/yellow] Reconnecting..."
             )
         elif self.connected == "timeout":
             self.update(f"[{bold}yellow]●[/{bold}yellow] Timeout")
@@ -279,10 +290,14 @@ class GivEnergyApp(App):
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("r", "refresh", "Refresh"),
+        Binding("r", "quick_refresh", "Refresh"),
+        Binding("shift+r", "full_refresh", "Full refresh"),
+        Binding("l", "toggle_log", "Logs"),
         # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
     ]
+
+    SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(
         self,
@@ -298,6 +313,8 @@ class GivEnergyApp(App):
         self._next_refresh_full = False
         self._last_refresh_at: datetime | None = None
         self._refreshing_since: datetime | None = None
+        self._reconnecting = False
+        self._status_frame = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -319,6 +336,7 @@ class GivEnergyApp(App):
         modbus_logger.setLevel(self.log_level)
         modbus_logger.addHandler(handler)
         await self.client.connect()
+        self.query_one(ConnectionStatus).connected = "probing"
         self.client.plant.capabilities = await self.client.detect()
         await self.client.load_config()
         await self.client.refresh()
@@ -327,13 +345,26 @@ class GivEnergyApp(App):
         self.set_interval(1, self._tick_status_bar)
         self.set_interval(1, self._update_panels)
 
+    @work
     async def _periodic_refresh(self) -> None:
-        if not self.client.connected:
+        if self._refreshing_since is not None:
             return
         full = self._next_refresh_full
         self._next_refresh_full = False
         self._refreshing_since = datetime.now()
         try:
+            if not self.client.connected:
+                self._reconnecting = True
+                try:
+                    # TODO(givenergy-modbus#62): connect() isn't safely re-entrant.
+                    # We rely on the old tasks having self-terminated on EOF so
+                    # `_shutting_down` stays False; don't call close() before this
+                    # until the upstream issue is fixed.
+                    await self.client.connect()
+                except CommunicationError:
+                    return
+                finally:
+                    self._reconnecting = False
             if full:
                 await self.client.load_config()
             await self.client.refresh()
@@ -351,35 +382,46 @@ class GivEnergyApp(App):
         self.query_one(BatteryPanel).refresh_from(plant)
 
     def _tick_status_bar(self) -> None:
-        # Connection status
         status = self.query_one(ConnectionStatus)
-        status.connected = self.client.connected
+        if self._reconnecting:
+            status.connected = "reconnecting"
+        else:
+            status.connected = self.client.connected
+        if not self.client.connected and self._refreshing_since is None:
+            self._periodic_refresh()
 
-        # Last refresh label
+        self._status_frame = (self._status_frame + 1) % len(self.SPINNER_FRAMES)
         refresh_label = self.query_one("#last-refresh", Label)
         if self._refreshing_since:
-            refresh_label.update(
-                f"Refreshing ({(datetime.now() - self._refreshing_since).total_seconds()}s elapsed)"
-            )
+            spinner = self.SPINNER_FRAMES[self._status_frame]
+            elapsed = int((datetime.now() - self._refreshing_since).total_seconds())
+            refresh_label.update(f"[yellow]{spinner}[/yellow] Refreshing… {elapsed}s")
+        elif self._last_refresh_at is None:
+            refresh_label.update("[dim]Updated: never[/dim]")
         else:
-            if self._last_refresh_at is None:
-                refresh_time = "never"
+            delta = int((datetime.now() - self._last_refresh_at).total_seconds())
+            if delta < 60:
+                refresh_label.update(f"[dim]Updated {delta}s ago[/dim]")
+            elif delta < 3600:
+                refresh_label.update(
+                    f"[dim]Updated {delta // 60}m ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                )
             else:
-                delta = int((datetime.now() - self._last_refresh_at).total_seconds())
-                if delta < 60:
-                    ago = f"{delta}s ago"
-                elif delta < 3600:
-                    m = delta // 60
-                    ago = f"{m}m ago"
-                else:
-                    h = delta // 3600
-                    ago = f"{h}h ago"
-                refresh_time = f"{self._last_refresh_at.strftime('%H:%M:%S')} ({ago})"
-            refresh_label.update(f"Last refresh: {refresh_time}")
+                refresh_label.update(
+                    f"[dim]Updated {delta // 3600}h ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                )
 
-    def action_refresh(self) -> None:
+    def action_quick_refresh(self) -> None:
+        self._next_refresh_full = False
+        self._periodic_refresh()
+
+    def action_full_refresh(self) -> None:
         self._next_refresh_full = True
-        self.notify("Full refresh queued.")
+        self._periodic_refresh()
+
+    def action_toggle_log(self) -> None:
+        log = self.query_one("#log-panel", RichLog)
+        log.display = not log.display
 
     # async def action_calibrate(self) -> None:
     #     if self.client.connected:
