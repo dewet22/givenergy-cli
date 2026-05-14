@@ -19,6 +19,8 @@ from textual.widgets import (
     ProgressBar,
     RichLog,
     Static,
+    TabbedContent,
+    TabPane,
 )
 
 from givenergy_modbus.client.client import Client
@@ -271,8 +273,10 @@ class GivEnergyApp(App):
 
     CSS = """
     Screen { layout: vertical; }
+    #tabs { height: 1fr; }
     #panels { height: 1fr; }
     #log-panel {
+        display: none;
         height: 10;
         width: 1fr;
         border-top: solid $accent;
@@ -292,6 +296,8 @@ class GivEnergyApp(App):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "quick_refresh", "Refresh"),
         Binding("shift+r", "full_refresh", "Full refresh"),
+        Binding("1", "show_live", "Live"),
+        Binding("2", "show_energy", "Energy"),
         Binding("l", "toggle_log", "Logs"),
         # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
@@ -318,10 +324,17 @@ class GivEnergyApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal(id="panels"):
-            yield InverterPanel()
-            yield PowerFlowPanel()
-            yield BatteryPanel()
+        with TabbedContent(initial="live-tab", id="tabs"):
+            with TabPane("Live", id="live-tab"):
+                with Horizontal(id="panels"):
+                    yield InverterPanel()
+                    yield PowerFlowPanel()
+                    yield BatteryPanel()
+            with TabPane("Energy", id="energy-tab"):
+                yield Label(
+                    "Energy view — node graph + ledger (coming next phase)",
+                    id="energy-placeholder",
+                )
         yield RichLog(id="log-panel", highlight=True, markup=True)
         with Horizontal(id="status-bar"):
             yield Label("", id="last-refresh")
@@ -427,6 +440,12 @@ class GivEnergyApp(App):
     def action_toggle_log(self) -> None:
         log = self.query_one("#log-panel", RichLog)
         log.display = not log.display
+
+    def action_show_live(self) -> None:
+        self.query_one(TabbedContent).active = "live-tab"
+
+    def action_show_energy(self) -> None:
+        self.query_one(TabbedContent).active = "energy-tab"
 
     # async def action_calibrate(self) -> None:
     #     if self.client.connected:
