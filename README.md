@@ -31,12 +31,14 @@ After `uv sync` the `givenergy-cli` command is available at `.venv/bin/givenergy
 uv run givenergy-cli --host 192.168.x.x tui
 ```
 
-Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status bar showing connection state and the time of the last refresh. The Inverter panel has collapsible Charge Slot and Discharge Slot sections.
+Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status bar showing connection state and the time of the last refresh. The Inverter panel has collapsible Charge Slot and Discharge Slot sections. The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
 
-| Key | Action |
-|-----|--------|
-| `r` | Force a full data refresh |
-| `q` | Quit |
+| Key       | Action                                                       |
+|-----------|--------------------------------------------------------------|
+| `r`       | Refresh now (re-reads instantaneous measurements)            |
+| `Shift+R` | Full refresh — also re-reads the holding-register config blocks |
+| `l`       | Toggle the modbus log panel                                  |
+| `q`       | Quit                                                         |
 
 ### `export` — dump registers to a portable JSON file
 
@@ -44,7 +46,7 @@ Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status ba
 uv run givenergy-cli --host 192.168.x.x export -o plant.json
 ```
 
-Connects, does a full refresh with `max_batteries=5`, and writes every register from every discovered slave address. Partial captures are still written on timeout, with a warning.
+Connects, runs `detect` to discover the plant topology, loads the holding-register config, fetches the input registers, and writes every register from every discovered device address. Partial captures are still written on timeout, with a warning.
 
 ### `inspect` — render an exported plant
 
@@ -52,7 +54,7 @@ Connects, does a full refresh with `max_batteries=5`, and writes every register 
 uv run givenergy-cli inspect plant.json
 ```
 
-Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery model fields plus per-slave raw register dumps (decimal + hex). No network required.
+Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery model fields plus per-device raw register dumps (decimal + hex). No network required.
 
 ## Environment variables
 
