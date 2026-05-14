@@ -335,12 +335,17 @@ class GivEnergyApp(App):
         modbus_logger = logging.getLogger("givenergy_modbus")
         modbus_logger.setLevel(self.log_level)
         modbus_logger.addHandler(handler)
-        await self.client.connect()
-        self.query_one(ConnectionStatus).connected = "probing"
-        self.client.plant.capabilities = await self.client.detect()
-        await self.client.load_config()
-        await self.client.refresh()
-        self._last_refresh_at = datetime.now()
+        try:
+            await self.client.connect()
+            self.query_one(ConnectionStatus).connected = "probing"
+            self.client.plant.capabilities = await self.client.detect()
+            await self.client.load_config()
+            await self.client.refresh()
+            self._last_refresh_at = datetime.now()
+        except Exception as exc:  # noqa: BLE001
+            modbus_logger.error(
+                "Startup failed: %r — will retry from periodic tick", exc
+            )
         self.set_interval(self.refresh_interval, self._periodic_refresh)
         self.set_interval(1, self._tick_status_bar)
         self.set_interval(1, self._update_panels)
