@@ -37,7 +37,7 @@ _BATTERY_ENUM_CONSTRAINTS = _battery_enum_register_constraints()
 def _decode_battery(cache: RegisterCache) -> Battery:
     """Decode a Battery, zeroing any enum-typed register whose value isn't a
     valid enum member. The local inverter's modbus implementation occasionally
-    hands back garbage (e.g. UsbDevice = 11 on slave 0x33) which would otherwise
+    hands back garbage (e.g. UsbDevice = 11 on device 0x33) which would otherwise
     abort the whole battery decode."""
     sanitised: RegisterCache | None = None
     for reg, valid in _BATTERY_ENUM_CONSTRAINTS.items():
@@ -117,7 +117,7 @@ def export_plant(host: str, port: int, output: Path) -> None:
     total = sum(len(c) for c in plant.register_caches.values())
     console.print(
         f"Wrote [bold]{total}[/bold] registers across "
-        f"[bold]{len(plant.register_caches)}[/bold] slave address(es) to [cyan]{output}[/cyan]"
+        f"[bold]{len(plant.register_caches)}[/bold] device address(es) to [cyan]{output}[/cyan]"
     )
 
 
@@ -149,7 +149,7 @@ def _model_table(title: str, model: SinglePhaseInverter | Battery) -> Table:
 
 def _register_table(addr: int, cache: RegisterCache) -> Table:
     table = Table(
-        title=f"Slave 0x{addr:02x} — {len(cache)} registers",
+        title=f"Device 0x{addr:02x} — {len(cache)} registers",
         show_header=True,
         header_style="bold yellow",
     )
@@ -163,8 +163,8 @@ def _register_table(addr: int, cache: RegisterCache) -> Table:
 
 
 def _decode_batteries(plant: Plant) -> list[tuple[int, int, Battery | str]]:
-    # Each entry is (slot_index, slave_addr, Battery or error message).
-    # Battery #1 shares slave 0x32 with the inverter (it uses IR 60-119 there);
+    # Each entry is (slot_index, device_addr, Battery or error message).
+    # Battery #1 shares device 0x32 with the inverter (it uses IR 60-119 there);
     # battery #2 lives at 0x33, and so on. We deliberately don't use
     # plant.number_batteries / plant.batteries because the library's exception
     # handler doesn't catch ValueError from enum decoding.
@@ -200,11 +200,13 @@ def show_plant(plant: Plant) -> None:
         console.rule("[bold green]Batteries[/bold green]")
         for slot, addr, item in decoded:
             if isinstance(item, Battery):
-                title = f"Battery #{slot} (slave 0x{addr:02x}, valid={item.is_valid()})"
+                title = (
+                    f"Battery #{slot} (device 0x{addr:02x}, valid={item.is_valid()})"
+                )
                 console.print(_model_table(title, item))
             else:
                 console.print(
-                    f"[yellow]Battery #{slot} (slave 0x{addr:02x}): {item}[/yellow]"
+                    f"[yellow]Battery #{slot} (device 0x{addr:02x}): {item}[/yellow]"
                 )
 
     console.rule("[bold green]Register Dump (debug)[/bold green]")
