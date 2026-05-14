@@ -63,14 +63,12 @@ def export(
         dir_okay=False,
         writable=True,
     ),
-    max_batteries: int = typer.Option(5, help="Maximum number of batteries to probe."),
 ) -> None:
     """Capture a full register dump from the inverter into a portable JSON file."""
     export_plant(
         host=_require_host(ctx),
         port=ctx.obj["port"],
         output=output,
-        max_batteries=max_batteries,
     )
 
 

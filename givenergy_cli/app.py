@@ -297,7 +297,7 @@ class GivEnergyApp(App):
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
         self._next_refresh_full = False
         self._last_refresh_at: datetime | None = None
-        self._last_refresh_failed = False
+        self._refreshing_since: datetime | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -319,34 +319,36 @@ class GivEnergyApp(App):
         modbus_logger.setLevel(self.log_level)
         modbus_logger.addHandler(handler)
         await self.client.connect()
-        await self.client.refresh_plant(full_refresh=True)
-        self._next_refresh_full = False
-        self._refreshing_since: datetime | None = None
-        # self.set_interval(self.refresh_interval, self._periodic_refresh)
+        self.client.plant.capabilities = await self.client.detect()
+        await self.client.load_config()
+        await self.client.refresh()
+        self._last_refresh_at = datetime.now()
+        self.set_interval(self.refresh_interval, self._periodic_refresh)
         self.set_interval(1, self._tick_status_bar)
         self.set_interval(1, self._update_panels)
 
     async def _periodic_refresh(self) -> None:
         if not self.client.connected:
             return
+        full = self._next_refresh_full
         self._next_refresh_full = False
         self._refreshing_since = datetime.now()
-        # try:
-        #     await self.client.refresh_plant(full_refresh=full)
-        # except TimeoutError:
-        #     pass
-        # else:
-        self._last_refresh_at = datetime.now()
-        self._update_panels()
-
-        self._refreshing_since = None
+        try:
+            if full:
+                await self.client.load_config()
+            await self.client.refresh()
+        except TimeoutError:
+            pass
+        else:
+            self._last_refresh_at = datetime.now()
+        finally:
+            self._refreshing_since = None
 
     def _update_panels(self) -> None:
         plant = self.client.plant
         self.query_one(InverterPanel).refresh_from(plant)
         self.query_one(PowerFlowPanel).refresh_from(plant)
         self.query_one(BatteryPanel).refresh_from(plant)
-        self._last_refresh_at = datetime.now()
 
     def _tick_status_bar(self) -> None:
         # Connection status

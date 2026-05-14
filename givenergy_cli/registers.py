@@ -78,22 +78,17 @@ def _deserialise_cache(data: dict[str, int]) -> RegisterCache:
     return RegisterCache.from_json(json.dumps(data))
 
 
-async def _capture(
-    host: str, port: int, max_batteries: int
-) -> tuple[Plant, str | None]:
-    """Connect, refresh, and return (plant, error). On partial failure we still
-    return whatever the plant captured up to that point."""
+async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
+    """Connect, detect, load config, refresh; return (plant, error). On partial
+    failure we still return whatever the plant captured up to that point."""
     client = Client(host=host, port=port)
     error: str | None = None
     try:
         await client.connect()
         try:
-            await client.refresh_plant(
-                full_refresh=True,
-                max_batteries=max_batteries,
-                timeout=3.0,
-                retries=2,
-            )
+            client.plant.capabilities = await client.detect(timeout=3.0)
+            await client.load_config(timeout=3.0, retries=2)
+            await client.refresh(timeout=3.0, retries=2)
         except TimeoutError:
             error = "timed out waiting for the inverter (returning partial data)"
         except Exception as exc:  # noqa: BLE001
@@ -103,11 +98,11 @@ async def _capture(
     return client.plant, error
 
 
-def export_plant(host: str, port: int, output: Path, max_batteries: int = 5) -> None:
+def export_plant(host: str, port: int, output: Path) -> None:
     console = Console()
     console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
     with _silence_shutdown_noise():
-        plant, error = asyncio.run(_capture(host, port, max_batteries))
+        plant, error = asyncio.run(_capture(host, port))
     if error:
         console.print(f"[yellow]Warning:[/yellow] {error}")
     payload = {
