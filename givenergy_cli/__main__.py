@@ -4,6 +4,7 @@ from pathlib import Path
 import typer
 
 from givenergy_cli.app import GivEnergyApp
+from givenergy_cli.capture import capture_frames
 from givenergy_cli.registers import export_plant, load_plant, show_plant
 
 
@@ -69,6 +70,34 @@ def export(
         host=_require_host(ctx),
         port=ctx.obj["port"],
         output=output,
+    )
+
+
+@app.command()
+def capture(
+    ctx: typer.Context,
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Path to write the captured frames log.",
+        dir_okay=False,
+        writable=True,
+    ),
+    duration: float = typer.Option(
+        60.0,
+        "--duration",
+        "-d",
+        min=0.1,
+        help="How long to capture, in seconds.",
+    ),
+) -> None:
+    """Record raw redacted wire frames for a bug report."""
+    capture_frames(
+        host=_require_host(ctx),
+        port=ctx.obj["port"],
+        output=output,
+        duration=duration,
     )
 
 
