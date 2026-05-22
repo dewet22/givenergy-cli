@@ -10,7 +10,7 @@ A command-line tool for monitoring and exporting data from GivEnergy inverters o
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.14+
 - A GivEnergy inverter accessible on the local network
 
 ## Installation
