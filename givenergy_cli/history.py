@@ -234,6 +234,74 @@ class History(Generic[T]):
 _SPARKLINE_BLOCKS = " ▁▂▃▄▅▆▇█"  # 9 levels: space (0) + 8 block heights
 
 
+def sparkline_centred(
+    values: list[float],
+    width: int = 8,
+    vmin_neg: float | None = None,
+    vmax_pos: float | None = None,
+) -> tuple[str, str]:
+    """Render a double-height signed sparkline centred at zero.
+
+    Returns ``(top_row, bottom_row)`` — two strings of ``width`` visible
+    cells each. Positive values render in the top row using ``▁▂▃▄▅▆▇█``
+    (bar grows from the row's bottom upward, away from the baseline that
+    sits at the boundary between rows). Negative values render in the
+    bottom row using the same lower-block characters wrapped in Rich
+    ``[reverse]`` markup — reversing swaps fg/bg so the ink visually moves
+    to the top of the cell (the baseline), giving 8-level resolution per
+    direction with the bar growing from the baseline downward.
+
+    The non-active row for each cell is a space. Negative cells emit
+    ``[reverse]…[/reverse]`` markup; the caller wraps both rows in a colour
+    span so the nested reverse picks up that fg as its inverted bg.
+    """
+    blank = " " * width
+    if len(values) < 2:
+        return (blank, blank)
+    if vmax_pos is None:
+        vmax_pos = max(max(values), 0.0)
+    if vmin_neg is None:
+        vmin_neg = min(min(values), 0.0)
+    pos_scale = max(vmax_pos, 1e-3)
+    neg_scale = max(-vmin_neg, 1e-3)
+    if pos_scale < 1e-3 and neg_scale < 1e-3:
+        return (blank, blank)
+
+    if len(values) <= width:
+        bucketed = list(values)
+        leading_pad = width - len(values)
+    else:
+        per = len(values) / width
+        bucketed = []
+        for i in range(width):
+            start = int(i * per)
+            end = max(start + 1, int((i + 1) * per))
+            chunk = values[start:end]
+            bucketed.append(sum(chunk) / len(chunk))
+        leading_pad = 0
+
+    up = "▁▂▃▄▅▆▇█"  # bottom-up fill, 8 levels
+    # Negative side: lower-block chars in reverse order with [reverse]
+    # styling. Cap at 7/8 (▁ reversed) so it stays visually distinct from a
+    # full-block positive cell.
+    down = "▇▆▅▄▃▂▁"
+    top: list[str] = [" "] * leading_pad
+    bot: list[str] = [" "] * leading_pad
+    for v in bucketed:
+        if v > 0:
+            idx = min(8, int(v / pos_scale * 8) + 1)
+            top.append(up[idx - 1])
+            bot.append(" ")
+        elif v < 0:
+            idx = min(7, int(-v / neg_scale * 7) + 1)
+            top.append(" ")
+            bot.append(f"[reverse]{down[idx - 1]}[/reverse]")
+        else:
+            top.append(" ")
+            bot.append(" ")
+    return ("".join(top), "".join(bot))
+
+
 def sparkline(
     values: list[float],
     width: int = 8,

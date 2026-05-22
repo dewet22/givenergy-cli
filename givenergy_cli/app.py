@@ -29,7 +29,13 @@ from givenergy_modbus.exceptions import CommunicationError
 from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
-from givenergy_cli.history import EnergyCounters, History, PlantSnapshot, sparkline
+from givenergy_cli.history import (
+    EnergyCounters,
+    History,
+    PlantSnapshot,
+    sparkline,
+    sparkline_centred,
+)
 
 # Getter signature: (inverter, plant) -> display string
 Getter = Callable[[SinglePhaseInverter, Plant], str]
@@ -39,6 +45,26 @@ def _fmt_slot(slot) -> str:
     if slot is None:
         return "—"
     return f"{slot.start.strftime('%H:%M')}–{slot.end.strftime('%H:%M')}"
+
+
+def _fmt_kw(value: float, width: int = 5, signed: bool = False) -> str:
+    """Format a kW value in fixed visual width, adapting precision so the
+    column stays the same as the magnitude grows: 2 decimals below 10,
+    1 decimal in the tens, 0 decimals at 100 and above.
+
+    ``width=5`` fits ``" X.XX"``, ``"99.99"``, ``" 12.3"``, ``"99.9 "``,
+    ``"  123"`` and so on. Set ``signed=True`` to always show a leading ±
+    (pair with ``width=6``).
+    """
+    sign = "+" if signed else ""
+    abs_v = abs(value)
+    if abs_v < 10:
+        precision = 2
+    elif abs_v < 100:
+        precision = 1
+    else:
+        precision = 0
+    return f"{value:>{sign}{width}.{precision}f}"
 
 
 class PlantPanel(Static):
@@ -201,7 +227,7 @@ class Topology(Static):
         padding: 1 2;
         height: auto;
         width: 87;
-        min-height: 19;
+        min-height: 20;
     }
     """
 
@@ -308,7 +334,7 @@ class Topology(Static):
         every `period` cells. When inactive, returns plain dashes."""
         if not active:
             return "─" * length
-        arrow = "►" if direction == "right" else "◄"
+        arrow = "▶" if direction == "right" else "◀"
         chars = ["─"] * length
         offset = int(frame * speed)
         for i in range(length):
@@ -410,6 +436,12 @@ class Topology(Static):
     _C_EPS: ClassVar[str] = "cyan"
     _C_INV: ClassVar[str] = "bright_blue"
     _C_DIM: ClassVar[str] = "bright_black"
+    # Sparkline / border colours for signed flows.
+    _C_LIGHT_RED: ClassVar[str] = "#ff7c7c"  # import (grid)
+    _C_LIGHT_GREEN: ClassVar[str] = "#7cff7c"  # export (grid) / discharge (battery)
+    _C_LIGHT_BLUE: ClassVar[str] = "#7caaff"  # charge (battery)
+    _C_GRID_IMPORTING: ClassVar[str] = "#bb4444"  # darker red border when importing
+    _C_GRID_EXPORTING: ClassVar[str] = "#44aa44"  # darker green border when exporting
 
     def _compose_diagram(
         self,
@@ -433,15 +465,15 @@ class Topology(Static):
         bat_c = self._C_BATTERY if abs(battery) > idle else DIM
 
         # Grid in-box indicator and connector direction:
-        #   export (grid > 0): inverter pushes left into Grid → ◄
-        #   import (grid < 0): Grid pushes right into inverter → ►
+        #   export (grid > 0): inverter pushes left into Grid → ◀
+        #   import (grid < 0): Grid pushes right into inverter → ▶
         grid_abs = abs(grid)
         grid_speed = self._flow_speed(grid_abs)
         if grid > idle:
-            grid_dir = "◄"
+            grid_dir = "◀"
             grid_connector = self._h_flow(8, "left", True, frame, speed=grid_speed)
         elif grid < -idle:
-            grid_dir = "►"
+            grid_dir = "▶"
             grid_connector = self._h_flow(8, "right", True, frame, speed=grid_speed)
         else:
             grid_dir = "·"
@@ -494,23 +526,33 @@ class Topology(Static):
         pv_spark = sparkline([s.pv for s in window], width=9)
         load_spark = sparkline([s.load for s in window], width=9)
         eps_spark = sparkline([s.eps for s in window], width=9)
-        soc_vals = [float(s.soc) for s in window if s.soc is not None]
-        soc_spark = sparkline(soc_vals, width=9, vmin=0.0, vmax=100.0)
+        # Signed power sparklines (centred at zero). For the battery, charge =
+        # positive on the chart (matches the value display convention). For
+        # grid, import = positive (energy entering the system rises above the
+        # baseline; export drops below).
+        bat_power_top, bat_power_bot = sparkline_centred(
+            [-s.battery for s in window], width=9
+        )
+        grid_power_top, grid_power_bot = sparkline_centred(
+            [-s.grid for s in window], width=9
+        )
 
         # Inner-width values for each box (split so sparkline + numeric parts
         # can take different colours). Solar/Battery are 25 inner; Load/EPS
         # are 20 inner; Grid stays 14 inner.
-        pv_value_main = f"    {pv:>5.2f} kW    "  # 16 (paired with 9-cell spark = 25)
-        grid_value = f" {grid_dir}  {grid_abs:>5.2f} kW  "  # 14
-        load_value_main = f" {load:>5.2f} kW  "  # 11 (paired with 9-cell spark = 20)
-        eps_value_main = f" {eps:>5.2f} kW  "  # 11
+        pv_value_main = (
+            f"    {_fmt_kw(pv)} kW    "  # 16 (paired with 9-cell spark = 25)
+        )
+        grid_value = f" {grid_dir}  {_fmt_kw(grid_abs)} kW  "  # 14
+        load_value_main = f" {_fmt_kw(load)} kW  "  # 11 (paired with 9-cell spark = 20)
+        eps_value_main = f" {_fmt_kw(eps)} kW  "  # 11
         soc_str = f"{soc:>3}%"  # 4
-        bat_flow_str = f"{bat_display:>+6.2f} kW"  # 9 — paired with 9-cell SOC spark
+        bat_flow_str = f"{_fmt_kw(bat_display, width=6, signed=True)} kW"  # 9 — paired with 9-cell SOC spark
         inv_label = "   Inverter  "  # 13
-        inv_value = f"🔄 {inv_through:>5.2f} kW  "  # 13 (🔄 = 2 visual cells)
+        inv_value = f"   {_fmt_kw(inv_through)} kW  "  # 13 — centred under "Inverter"
         # Total-output label sits above the trunk on row 6, centred in the 14
         # cells between the inverter wall and the Y-splitter's vertical-up.
-        trunk_label = f"   {total_out:>5.2f} kW   "  # 14
+        trunk_label = f"   {_fmt_kw(total_out)} kW   "  # 14
         # Battery box title pluralises when the plant reports a stack rather
         # than a single unit. Dash count keeps the box at 27 cells wide.
         bat_word = "Batteries" if n_batteries > 1 else "Battery"
@@ -524,14 +566,21 @@ class Topology(Static):
         #   col 34     : vertical conduit (solar / battery)
         #   col 42-55  : combined-output trunk (14 wide, pure animation)
         #   col 56     : Y-splitter ┤ (row 7), verticals (rows 6/8), corners (rows 5/9)
-        #   col 57-58  : `─►` entry to Load (row 5) and EPS (row 9)
+        #   col 57-58  : `─▶` entry to Load (row 5) and EPS (row 9)
         #   col 59-80  : Load box (rows 4–6) / EPS box (rows 8–10) — 22 wide
         SOLAR = self._C_SOLAR
-        GRID = self._C_GRID
         BATTERY = self._C_BATTERY
         LOAD = self._C_LOAD
         EPS_C = self._C_EPS
         INV = self._C_INV
+        # Grid border reflects current direction; defaults to the identity
+        # colour when idle.
+        if grid > idle:
+            GRID = self._C_GRID_EXPORTING
+        elif grid < -idle:
+            GRID = self._C_GRID_IMPORTING
+        else:
+            GRID = self._C_GRID
 
         lines = [
             # 0-2: Solar (27 outer, ┬ at col 34)
@@ -543,57 +592,63 @@ class Topology(Static):
             f"{' ' * 21}{col('└────────────┬────────────┘', SOLAR)}",
             # 3: Solar conduit top
             f"{' ' * 34}{col(pv_top, pv_c)}",
-            # 4: Solar conduit bottom + Load top
+            # 4: Solar conduit bottom (right side now empty — Loads top moved
+            # into the central row 5-9 band)
+            f"{' ' * 34}{col(pv_bot, pv_c)}",
+            # 5: Grid top + Inverter top + Combined Loads top
             (
-                f"{' ' * 34}{col(pv_bot, pv_c)}{' ' * 24}{col('┌─ 🏠 Load ──────────┐', LOAD)}"
+                f"   {col('┌─ ', GRID)}⚡️{col(' Grid ────┐', GRID)}"
+                f"        {col('╔══════╧══════╗', INV)}"
+                f"                 {col('┌─ 🏠 Loads ─────────┐', LOAD)}"
             ),
-            # 5: Inverter top + Load entry (corner-up-right) + Load value
+            # 6: Grid spark top + Inverter label + trunk-label + Y-splitter
+            # corner-up + Load value
             (
-                f"{' ' * 27}{col('┌──────┴──────┐', INV)}"
-                f"{' ' * 14}{col('┌─►', load_c)}"
+                f"   {col('│', GRID)}  {col(grid_power_top, self._C_LIGHT_RED)}   {col('│', GRID)}"
+                f"        {col('║', INV)}{col(inv_label, inv_c)}{col('║', INV)}"
+                f"{col(trunk_label, out_c)}{col('┌─▶', load_c)}"
                 f"{col('│', LOAD)}{col(load_spark, LOAD)}"
                 f"{col(load_value_main, load_c)}{col('│', LOAD)}"
             ),
-            # 6: Grid top + Inverter label + trunk-label + vertical-up + Load bottom
+            # 7: Grid spark bot + connector + Inverter value + trunk + Y-splitter
+            # + Loads divider (with EPS sub-label). Connector enters the Grid
+            # right wall at the spark_bot row; the kW value is on the row
+            # below for readability.
             (
-                f"   {col('┌─ ', GRID)}⚡️{col(' Grid ────┐', GRID)}"
-                f"        {col('│', INV)}{col(inv_label, inv_c)}{col('│', INV)}"
-                f"{col(trunk_label, out_c)}{col('│', load_c)}  {col('└────────────────────┘', LOAD)}"
+                f"   {col('│', GRID)}  {col(grid_power_bot, self._C_LIGHT_GREEN)}   {col('│', GRID)}"
+                f"{col(grid_connector, grid_c)}"
+                f"{col('╢', INV)}{col(inv_value, inv_c)}{col('╟', INV)}"
+                f"{col(trunk, out_c)}{col('┤', out_c)}  "
+                f"{col('├─ 🆘 EPS ───────────┤', LOAD)}"
             ),
-            # 7: Grid value + connector + Inverter value + trunk + Y-splitter
+            # 8: Grid value + Inverter blank + Y-splitter corner-down + EPS value
             (
                 f"   {col('│', GRID)}{col(grid_value, grid_c)}{col('│', GRID)}"
-                f"{col(grid_connector, grid_c)}"
-                f"{col('┤', INV)}{col(inv_value, inv_c)}{col('├', INV)}"
-                f"{col(trunk, out_c)}{col('┤', out_c)}"
+                f"        {col('║', INV)}             {col('║', INV)}"
+                f"{' ' * 14}{col('└─▶', eps_c)}"
+                f"{col('│', LOAD)}{col(eps_spark, EPS_C)}"
+                f"{col(eps_value_main, eps_c)}{col('│', LOAD)}"
             ),
-            # 8: Grid bottom + Inverter blank + vertical-down + EPS top
+            # 9: Grid bottom + Inverter bottom + Combined Loads bottom
             (
                 f"   {col('└──────────────┘', GRID)}"
-                f"        {col('│', INV)}             {col('│', INV)}"
-                f"{' ' * 14}{col('│', eps_c)}  {col('┌─ 🆘 EPS ───────────┐', EPS_C)}"
+                f"        {col('╚══════╤══════╝', INV)}"
+                f"                 {col('└────────────────────┘', LOAD)}"
             ),
-            # 9: Inverter bottom + EPS entry (corner-down-right) + EPS value
-            (
-                f"{' ' * 27}{col('└──────┬──────┘', INV)}"
-                f"{' ' * 14}{col('└─►', eps_c)}"
-                f"{col('│', EPS_C)}{col(eps_spark, EPS_C)}"
-                f"{col(eps_value_main, eps_c)}{col('│', EPS_C)}"
-            ),
-            # 10: Battery conduit top + EPS bottom
-            (
-                f"{' ' * 34}{col(bat_top, bat_c)}"
-                f"{' ' * 24}{col('└────────────────────┘', EPS_C)}"
-            ),
+            # 10: Battery conduit top (Loads bottom now at row 9)
+            f"{' ' * 34}{col(bat_top, bat_c)}",
             # 11: Battery conduit bottom
             f"{' ' * 34}{col(bat_bot, bat_c)}",
-            # 12-14: Battery (SOC + sparkline always in identity colour;
-            # the flow value dims when battery is idle). 27 outer.
+            # 12-15: Battery — SOC and power flow stacked on the left,
+            # double-height centred sparkline filling the right side. 27 outer.
             f"{' ' * 21}{col(bat_top_str, BATTERY)}",
             (
-                f"{' ' * 21}{col('│', BATTERY)} {col(soc_str, BATTERY)} "
-                f"{col(soc_spark, BATTERY)} {col(bat_flow_str, bat_c)}"
-                f"{col('│', BATTERY)}"
+                f"{' ' * 21}{col('│', BATTERY)} {col(soc_str, BATTERY)}"
+                f"           {col(bat_power_top, self._C_LIGHT_BLUE)}{col('│', BATTERY)}"
+            ),
+            (
+                f"{' ' * 21}{col('│', BATTERY)} {col(bat_flow_str, bat_c)}"
+                f"      {col(bat_power_bot, self._C_LIGHT_GREEN)}{col('│', BATTERY)}"
             ),
             f"{' ' * 21}{col('└─────────────────────────┘', BATTERY)}",
         ]
@@ -687,7 +742,7 @@ class EnergyBalance(Static):
 
         def v(value: float, identity: str) -> str:
             c = identity if abs(value) > idle else DIM
-            return f"[{c}]{value:>5.2f} kW[/{c}]"
+            return f"[{c}]{_fmt_kw(value)} kW[/{c}]"
 
         def row(
             l_label: str,
@@ -756,7 +811,7 @@ class EnergyBalance(Static):
             f"  {hdr}  {hdr}",
             row("Total", in_total, INV, "Total", out_total, INV),
             "",
-            f"  {imb_label}: [{imb_col}]{imb_disp:>+5.2f} kW{imb_pct}[/{imb_col}]",
+            f"  {imb_label}: [{imb_col}]{_fmt_kw(imb_disp, signed=True)} kW{imb_pct}[/{imb_col}]",
         ]
         if e_in_kwh is not None and e_out_kwh is not None and e_dt_s is not None:
             elapsed_min = e_dt_s / 60
