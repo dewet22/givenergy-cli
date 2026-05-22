@@ -12,6 +12,12 @@ dependencies = [
     "textual>=8.2.5,<9.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/dewet22/givenergy-cli"
+Repository = "https://github.com/dewet22/givenergy-cli"
+Issues = "https://github.com/dewet22/givenergy-cli/issues"
+Changelog = "https://github.com/dewet22/givenergy-cli/blob/main/CHANGELOG.md"
+
 [project.scripts]
 givenergy-cli = "givenergy_cli.__main__:app"
 
