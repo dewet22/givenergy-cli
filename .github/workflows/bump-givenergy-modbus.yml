@@ -56,23 +56,29 @@ jobs:
         env:
           NEW: ${{ steps.ver.outputs.new }}
         run: |
-          python3 - <<'PY'
+          uv run --with packaging python - <<'PY'
           import os, re, pathlib
+          from packaging.version import Version
           new = os.environ["NEW"]
           p = pathlib.Path("pyproject.toml")
           text = p.read_text()
-          # Match "givenergy-modbus>=<version>" capturing the version as a
-          # separate group that stops at the next comma or closing quote;
-          # this handles pre-release suffixes (e.g. "1.2.0a1") in the
-          # existing pin without leaving the suffix glued to the new version.
-          updated, n = re.subn(
-              r'("givenergy-modbus>=)[^",]+(.*?")',
-              rf'\g<1>{new}\g<2>',
-              text,
-          )
-          if n == 0:
-              raise SystemExit("no givenergy-modbus pin found in pyproject.toml")
-          p.write_text(updated)
+          # Pin form: "givenergy-modbus>=X,<Y" — capture both bounds so the new
+          # floor can be validated against the existing cap before writing.
+          pin_re = re.compile(r'"givenergy-modbus>=([^",]+),<([^",]+)"')
+          m = pin_re.search(text)
+          if not m:
+              raise SystemExit("no givenergy-modbus pin with >=X,<Y form found in pyproject.toml")
+          upper = m.group(2)
+          # Compare against the release portion of NEW so e.g. "2.0.0rc1" is
+          # rejected against "<2.0.0" — otherwise uv would silently resolve the
+          # resulting spec to an empty version set.
+          if Version(Version(new).base_version) >= Version(upper):
+              print(
+                  f"::error::new version {new} violates existing upper cap <{upper}; "
+                  f"bump the cap manually in pyproject.toml first"
+              )
+              raise SystemExit(1)
+          p.write_text(pin_re.sub(f'"givenergy-modbus>={new},<{upper}"', text))
           PY
 
       - name: Refresh uv.lock
