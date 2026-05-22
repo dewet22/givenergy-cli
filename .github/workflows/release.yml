@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type (ignored when republish_tag is set)
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+          - finalize
+      prerelease_stage:
+        description: With major/minor/patch — start a prerelease line (e.g. major + alpha → 2.0.0a1). With prerelease — advance the stage forward-only (e.g. prerelease + rc on 2.0.0a6 → 2.0.0rc1).
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - alpha
+          - beta
+          - rc
+      republish_tag:
+        description: Existing tag to re-publish (e.g. v1.0.0a1). Skips bump/commit/tag and the GitHub Release creation; only builds and publishes to PyPI.
+        required: false
+        type: string
+
+jobs:
+  release:
+    # Pure-Python package: the wheel is platform-independent, so a single
+    # Ubuntu runner is sufficient.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Required for PyPI trusted publishing via OIDC (no API token).
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # For republish: check out the tagged commit so the build picks up
+          # the exact pyproject.toml/uv.lock state that was originally released.
+          ref: ${{ inputs.republish_tag || github.ref }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Determine version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          PRERELEASE_STAGE: ${{ inputs.prerelease_stage }}
+          REPUBLISH_TAG: ${{ inputs.republish_tag }}
+        run: |
+          if [ -n "$REPUBLISH_TAG" ]; then
+            # Republish path: derive version from the tag, skip the bump.
+            NEW="${REPUBLISH_TAG#v}"
+          else
+            CURRENT=$(uv version --short)
+            # `prerelease_stage=none` (or unset) means no prerelease flag passed.
+            if [ -n "$PRERELEASE_STAGE" ] && [ "$PRERELEASE_STAGE" != "none" ]; then
+              NEW=$(python3 scripts/release.py bump "$CURRENT" "$BUMP" --prerelease "$PRERELEASE_STAGE")
+            else
+              NEW=$(python3 scripts/release.py bump "$CURRENT" "$BUMP")
+            fi
+            uv version "$NEW"
+            uv lock
+          fi
+          echo "version=$NEW" >> $GITHUB_OUTPUT
+          # Expose whether this is a prerelease so downstream steps can mark it.
+          if [[ "$NEW" =~ (a|b|rc)[0-9]+$ ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate CHANGELOG section
+        if: inputs.republish_tag == ''
+        id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BODY=$(python3 scripts/release.py generate "$VERSION")
+          {
+            echo 'body<<EOF_BODY'
+            echo "$BODY"
+            echo 'EOF_BODY'
+          } >> $GITHUB_OUTPUT
+
+      - name: Commit and tag
+        if: inputs.republish_tag == ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml CHANGELOG.md uv.lock
+          git commit -m "chore: release ${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Build
+        run: uv build
+
+      - name: Create GitHub Release
+        if: inputs.republish_tag == ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: dist/*.whl
+          draft: false
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Wait for PyPI to index the new version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # pypa/gh-action-pypi-publish returns once PyPI accepts the upload,
+          # but there is a brief eventual-consistency window before the new
+          # version is resolvable by `pip install` / `uv lock`. Hold the run
+          # open until the JSON API confirms the version is indexed so anyone
+          # tailing the workflow knows when the release is genuinely live.
+          URL="https://pypi.org/pypi/givenergy-cli/$VERSION/json"
+          for attempt in $(seq 1 60); do
+            if curl -fsSL "$URL" > /dev/null 2>&1; then
+              echo "PyPI has indexed $VERSION (attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt/60: $VERSION not yet resolvable, sleeping 10s..."
+            sleep 10
+          done
+          echo "::error::PyPI did not index $VERSION within 10 minutes"
+          exit 1
