@@ -5,7 +5,12 @@ import typer
 
 from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
-from givenergy_cli.registers import export_plant, load_plant, show_plant
+from givenergy_cli.registers import (
+    export_plant,
+    load_plant,
+    probe_registers,
+    show_plant,
+)
 
 
 class LogLevel(str, Enum):
@@ -98,6 +103,60 @@ def capture(
         port=ctx.obj["port"],
         output=output,
         duration=duration,
+    )
+
+
+class RegisterType(str, Enum):
+    HR = "hr"
+    IR = "ir"
+
+
+@app.command()
+def probe(
+    ctx: typer.Context,
+    register_type: RegisterType = typer.Option(
+        ...,
+        "--type",
+        "-t",
+        help="Register bank to probe: 'hr' (holding) or 'ir' (input).",
+    ),
+    base: int = typer.Option(
+        ...,
+        "--base",
+        "-b",
+        help="First register address to read.",
+    ),
+    count: int = typer.Option(
+        60,
+        "--count",
+        "-n",
+        min=1,
+        help="Number of registers to read (requests are split into chunks of 60).",
+    ),
+    device_address: int = typer.Option(
+        0x11,
+        "--device",
+        "-d",
+        help="Modbus device address to target (e.g. 0x11 for inverter, 0x31 for AC).",
+    ),
+) -> None:
+    """Read an arbitrary register range directly from the inverter.
+
+    Issues raw Modbus read requests, bypassing the normal polling. Useful for
+    probing undocumented register blocks — e.g. to check whether HR(4080+) holds
+    battery energy totals on AC-coupled models.
+
+    Example — probe the HR(4080–4139) block on an AC inverter:
+
+        givenergy-cli --host 192.168.1.x probe --type hr --base 4080 --count 60 --device 0x31
+    """
+    probe_registers(
+        host=_require_host(ctx),
+        port=ctx.obj["port"],
+        register_type=register_type.value,
+        device_address=device_address,
+        base=base,
+        count=count,
     )
 
 
