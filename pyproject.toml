@@ -7,7 +7,7 @@ license = "Apache-2.0"
 authors = [{ name = "Dewet Diener", email = "givenergy-modbus@dewet.org" }]
 requires-python = ">=3.14,<4.0"
 dependencies = [
-    "givenergy-modbus>=2.0.0,<3.0.0",
+    "givenergy-modbus>=2.1.0b2,<3.0.0",
     "typer>=0.25.1,<0.26.0",
     "textual>=8.2.5,<9.0.0",
 ]
