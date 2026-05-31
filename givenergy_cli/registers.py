@@ -341,7 +341,8 @@ def probe_registers(
     A timeout or exception response is reported per-request rather than
     aborting the whole probe.
     """
-    asyncio.run(_probe(host, port, register_type, device_address, base, count))
+    with _silence_shutdown_noise():
+        asyncio.run(_probe(host, port, register_type, device_address, base, count))
 
 
 async def _probe(

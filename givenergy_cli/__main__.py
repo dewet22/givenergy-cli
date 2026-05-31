@@ -150,6 +150,10 @@ def probe(
 
         givenergy-cli --host 192.168.1.x probe --type hr --base 4080 --count 60 --device 0x31
     """
+    if base + count > 65536:
+        raise typer.BadParameter(
+            f"Range base {base} + count {count} exceeds the maximum Modbus register address (65535)."
+        )
     probe_registers(
         host=_require_host(ctx),
         port=ctx.obj["port"],
