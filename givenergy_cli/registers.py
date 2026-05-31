@@ -12,7 +12,6 @@ from rich.console import Console
 from rich.table import Table
 
 from givenergy_modbus.client.client import Client
-from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegistersRequest
 from givenergy_modbus.model.battery import Battery, BatteryRegisterGetter
 from givenergy_modbus.model.ems import Ems
 from givenergy_modbus.model.gateway import GatewayV1, GatewayV2
@@ -23,6 +22,7 @@ from givenergy_modbus.model.meter import Meter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 from givenergy_modbus.model.register import Register
 from givenergy_modbus.model.register_cache import RegisterCache
+from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegistersRequest
 
 
 def _battery_enum_register_constraints() -> dict[Register, set[int]]:
@@ -364,7 +364,7 @@ async def _probe(
     client = Client(host=host, port=port)
     try:
         await client.connect()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Connection failed:[/red] {exc}")
         return
 
@@ -380,43 +380,44 @@ async def _probe(
     # Issue requests in chunks of at most 60 registers.
     offset = 0
     any_response = False
-    while offset < count:
-        chunk = min(60, count - offset)
-        chunk_base = base + offset
-        RequestClass = (
-            ReadHoldingRegistersRequest
-            if register_type == "hr"
-            else ReadInputRegistersRequest
-        )
-        request = RequestClass(
-            base_register=chunk_base,
-            register_count=chunk,
-            device_address=device_address,
-        )
-        try:
-            response = await client.send_request_and_await_response(
-                request, timeout=3.0, retries=1
+    try:
+        while offset < count:
+            chunk = min(60, count - offset)
+            chunk_base = base + offset
+            RequestClass = (
+                ReadHoldingRegistersRequest
+                if register_type == "hr"
+                else ReadInputRegistersRequest
             )
-            for i, val in enumerate(response.register_values):
-                table.add_row(
-                    f"{reg_label}({chunk_base + i})",
-                    str(val),
-                    f"0x{val:04x}",
+            request = RequestClass(
+                base_register=chunk_base,
+                register_count=chunk,
+                device_address=device_address,
+            )
+            try:
+                response = await client.send_request_and_await_response(
+                    request, timeout=3.0, retries=1
                 )
-            any_response = True
-        except TimeoutError:
-            console.print(
-                f"[yellow]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
-                f"timed out — no response[/yellow]"
-            )
-        except Exception as exc:
-            console.print(
-                f"[red]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
-                f"error — {exc}[/red]"
-            )
-        offset += chunk
-
-    await client.close()
+                for i, val in enumerate(response.register_values):
+                    table.add_row(
+                        f"{reg_label}({chunk_base + i})",
+                        str(val),
+                        f"0x{val:04x}",
+                    )
+                any_response = True
+            except TimeoutError:
+                console.print(
+                    f"[yellow]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
+                    f"timed out — no response[/yellow]"
+                )
+            except Exception as exc:  # noqa: BLE001
+                console.print(
+                    f"[red]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
+                    f"error — {exc}[/red]"
+                )
+            offset += chunk
+    finally:
+        await client.close()
 
     if any_response:
         console.print(table)
