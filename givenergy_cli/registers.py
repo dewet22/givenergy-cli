@@ -22,6 +22,7 @@ from givenergy_modbus.model.meter import Meter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 from givenergy_modbus.model.register import Register
 from givenergy_modbus.model.register_cache import RegisterCache
+from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegistersRequest
 
 
 def _battery_enum_register_constraints() -> dict[Register, set[int]]:
@@ -323,4 +324,104 @@ def _print_hv_stack(console: Console, stack: HvStack) -> None:
     for i, bmu in enumerate(stack.bmus):
         console.print(
             _model_table(f"BMU #{i + 1} (under 0x{stack.device_address:02x})", bmu)
+        )
+
+
+def probe_registers(
+    host: str,
+    port: int,
+    register_type: str,
+    device_address: int,
+    base: int,
+    count: int,
+) -> None:
+    """Issue a raw holding or input register read and print the results.
+
+    Issues one or more sequential requests of up to 60 registers each.
+    A timeout or exception response is reported per-request rather than
+    aborting the whole probe.
+    """
+    with _silence_shutdown_noise():
+        asyncio.run(_probe(host, port, register_type, device_address, base, count))
+
+
+async def _probe(
+    host: str,
+    port: int,
+    register_type: str,
+    device_address: int,
+    base: int,
+    count: int,
+) -> None:
+    console = Console()
+    reg_label = "HR" if register_type == "hr" else "IR"
+    console.print(
+        f"Probing [bold]{reg_label}({base}..{base + count - 1})[/bold] "
+        f"at device [bold]0x{device_address:02x}[/bold] "
+        f"on [bold]{host}:{port}[/bold]…"
+    )
+
+    client = Client(host=host, port=port)
+    try:
+        await client.connect()
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Connection failed:[/red] {exc}")
+        return
+
+    table = Table(
+        title=f"{reg_label} probe @ device 0x{device_address:02x}",
+        show_header=True,
+        header_style="bold yellow",
+    )
+    table.add_column("Register", style="cyan", no_wrap=True)
+    table.add_column("Decimal", justify="right")
+    table.add_column("Hex", justify="right", style="dim")
+
+    # Issue requests in chunks of at most 60 registers.
+    offset = 0
+    any_response = False
+    try:
+        while offset < count:
+            chunk = min(60, count - offset)
+            chunk_base = base + offset
+            RequestClass = (
+                ReadHoldingRegistersRequest
+                if register_type == "hr"
+                else ReadInputRegistersRequest
+            )
+            request = RequestClass(
+                base_register=chunk_base,
+                register_count=chunk,
+                device_address=device_address,
+            )
+            try:
+                response = await client.send_request_and_await_response(
+                    request, timeout=3.0, retries=1
+                )
+                for i, val in enumerate(response.register_values):
+                    table.add_row(
+                        f"{reg_label}({chunk_base + i})",
+                        str(val),
+                        f"0x{val:04x}",
+                    )
+                any_response = True
+            except TimeoutError:
+                console.print(
+                    f"[yellow]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
+                    f"timed out — no response[/yellow]"
+                )
+            except Exception as exc:  # noqa: BLE001
+                console.print(
+                    f"[red]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
+                    f"error — {exc}[/red]"
+                )
+            offset += chunk
+    finally:
+        await client.close()
+
+    if any_response:
+        console.print(table)
+    else:
+        console.print(
+            "[yellow]No registers responded. The block may not exist on this device.[/yellow]"
         )
