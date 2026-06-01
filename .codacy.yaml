@@ -1,0 +1,6 @@
+---
+# Exclude the test suite from static analysis. This mirrors the project's
+# pre-commit bandit config (prek.toml: bandit `--exclude=tests`): pytest's
+# `assert` statements would otherwise be flagged as bandit B101.
+exclude_paths:
+  - 'tests/**'
