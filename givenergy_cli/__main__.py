@@ -13,8 +13,10 @@ from givenergy_cli.registers import (
 )
 
 
-def _parse_int(value: str) -> int:
+def _parse_int(value: str | int) -> int:
     """Parse an int accepting decimal or 0x/0o/0b-prefixed (hex/octal/binary) input."""
+    if isinstance(value, int):
+        return value  # an option default is passed through already parsed
     return int(value, 0)  # base-0 auto-detects the 0x / 0o / 0b prefix
 
 
