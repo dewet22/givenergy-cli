@@ -13,6 +13,11 @@ from givenergy_cli.registers import (
 )
 
 
+def _parse_int(value: str) -> int:
+    """Parse an int accepting decimal or 0x/0o/0b-prefixed (hex/octal/binary) input."""
+    return int(value, 0)  # base-0 auto-detects the 0x / 0o / 0b prefix
+
+
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -124,7 +129,8 @@ def probe(
         ...,
         "--base",
         "-b",
-        help="First register address to read.",
+        parser=_parse_int,
+        help="First register address to read (decimal or 0x-hex).",
     ),
     count: int = typer.Option(
         60,
@@ -137,7 +143,9 @@ def probe(
         0x11,
         "--device",
         "-d",
-        help="Modbus device address to target (e.g. 0x11 for inverter, 0x31 for AC).",
+        parser=_parse_int,
+        help="Modbus device address to target, decimal or 0x-hex "
+        "(e.g. 0x11 for inverter, 0x31 for AC).",
     ),
 ) -> None:
     """Read an arbitrary register range directly from the inverter.
@@ -150,6 +158,16 @@ def probe(
 
         givenergy-cli --host 192.168.1.x probe --type hr --base 4080 --count 60 --device 0x31
     """
+    if not 0 <= device_address <= 0xFF:
+        raise typer.BadParameter(
+            f"Device address must be between 0 and 255 (0xff); got {device_address}.",
+            param_hint="'--device' / '-d'",
+        )
+    if not 0 <= base <= 0xFFFF:
+        raise typer.BadParameter(
+            f"Base register must be between 0 and 65535 (0xffff); got {base}.",
+            param_hint="'--base' / '-b'",
+        )
     if base + count > 65536:
         raise typer.BadParameter(
             f"Range base {base} + count {count} exceeds the maximum Modbus register address (65535)."

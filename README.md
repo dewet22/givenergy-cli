@@ -59,9 +59,9 @@ Issues raw Modbus read requests, bypassing the normal capability-driven polling.
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--type` / `-t` | Register bank: `hr` (holding) or `ir` (input) | required |
-| `--base` / `-b` | First register address | required |
+| `--base` / `-b` | First register address (decimal or `0x`-hex) | required |
 | `--count` / `-n` | Number of registers to read | `60` |
-| `--device` / `-d` | Modbus device address (e.g. `0x11` inverter, `0x31` AC) | `0x11` |
+| `--device` / `-d` | Modbus device address, decimal or `0x`-hex (e.g. `0x11` inverter, `0x31` AC) | `0x11` |
 
 ### `export` — dump registers to a portable JSON file
 
