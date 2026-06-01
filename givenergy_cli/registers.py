@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from givenergy_modbus.client.client import Client
+from givenergy_modbus.exceptions import RefreshFailed, RefreshPartiallySucceeded
 from givenergy_modbus.model.battery import Battery, BatteryRegisterGetter
 from givenergy_modbus.model.ems import Ems
 from givenergy_modbus.model.gateway import GatewayV1, GatewayV2
@@ -97,6 +98,14 @@ async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
             await client.refresh(timeout=3.0, retries=2)
         except TimeoutError:
             error = "timed out waiting for the inverter (returning partial data)"
+        except RefreshPartiallySucceeded as exc:
+            failed = ", ".join(
+                f"0x{f.device_address:02x} {f.request_type}({f.base_register})"
+                for f in exc.failures
+            )
+            error = f"partial refresh — {len(exc.failures)} read(s) failed: {failed}"
+        except RefreshFailed:
+            error = "all register reads failed — inverter may be offline (returning partial data)"
         except Exception as exc:  # noqa: BLE001
             error = f"refresh failed: {exc!r} (returning partial data)"
     finally:
