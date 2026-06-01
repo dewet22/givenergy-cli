@@ -170,9 +170,9 @@ def probe(
             f"Base register must be between 0 and 65535 (0xffff); got {base}.",
             param_hint="'--base' / '-b'",
         )
-    if base + count > 65536:
+    if base + count > 0x10000:
         raise typer.BadParameter(
-            f"Range base {base} + count {count} exceeds the maximum Modbus register address (65535)."
+            f"Range base {base} + count {count} exceeds the maximum Modbus register address (0xffff)."
         )
     probe_registers(
         host=_require_host(ctx),
