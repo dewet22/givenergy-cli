@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.2.0] - 2026-06-01
+
+### ✨ Added
+
+- bump to givenergy-modbus 2.1, add AGENTS.md ([d3a2184](https://github.com/dewet22/givenergy-cli/commit/d3a21849370af6e6b50597943195684570729a15))
+
 ## [1.1.0] - 2026-06-01
 
 ### 🔧 Maintenance
