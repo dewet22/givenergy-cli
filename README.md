@@ -40,6 +40,29 @@ Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status ba
 | `l`       | Toggle the modbus log panel                                  |
 | `q`       | Quit                                                         |
 
+### `capture` — record wire frames for a bug report
+
+```bash
+uv run givenergy-cli --host 192.168.x.x capture --output frames.log --duration 60
+```
+
+Connects and records raw redacted Modbus frames for the given duration (default 60 s). Writes one line per frame: a UTC timestamp and the hex payload. The output file is safe to attach to a GitHub issue.
+
+### `probe` — read an arbitrary register range
+
+```bash
+uv run givenergy-cli --host 192.168.x.x probe --type hr --base 4080 --count 60 --device 0x31
+```
+
+Issues raw Modbus read requests, bypassing the normal capability-driven polling. Useful for exploring undocumented register blocks — e.g. checking whether HR(4080+) holds battery energy totals on AC-coupled models. Requests are split into 60-register chunks automatically; timeouts are reported per-chunk rather than aborting the whole probe.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--type` / `-t` | Register bank: `hr` (holding) or `ir` (input) | required |
+| `--base` / `-b` | First register address | required |
+| `--count` / `-n` | Number of registers to read | `60` |
+| `--device` / `-d` | Modbus device address (e.g. `0x11` inverter, `0x31` AC) | `0x11` |
+
 ### `export` — dump registers to a portable JSON file
 
 ```bash
@@ -70,8 +93,9 @@ Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery mod
 ```text
 givenergy_cli/
     __init__.py
-    __main__.py    — Typer entry point (tui / export / inspect subcommands)
+    __main__.py    — Typer entry point (tui / capture / probe / export / inspect subcommands)
     app.py         — Textual TUI app
+    capture.py     — frame-capture logic for bug reports
     registers.py   — export, load, and rich-formatted display of register dumps
 tests/
     fixtures/      — anonymised plant JSON fixtures (good + bad-enum cases)
@@ -84,4 +108,4 @@ tests/
 | `givenergy-modbus` | Modbus TCP client and data model for GivEnergy inverters |
 | `textual` | Terminal UI framework |
 | `typer` | CLI argument parsing |
-| `rich` | Console formatting for `export` / `inspect` output |
+| `rich` | Console formatting for `export` / `capture` / `inspect` output |
