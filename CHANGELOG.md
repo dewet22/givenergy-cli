@@ -9,6 +9,9 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.3.0] - 2026-06-01
+
+
 ## [1.2.0] - 2026-06-01
 
 ### ✨ Added
