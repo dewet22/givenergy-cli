@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.1.0] - 2026-06-01
+
+### 🔧 Maintenance
+
+- update README — add capture/probe commands, reorder usage section ([34e58c7](https://github.com/dewet22/givenergy-cli/commit/34e58c72ef9ece9b3224addab2e375922e7e9130))
+
 ## [1.0.0] - 2026-05-22
 
 ### 🔧 Maintenance
