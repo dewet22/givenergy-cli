@@ -229,6 +229,11 @@ def mock_server(
         givenergy-cli mock-server --capture plant.log
         givenergy-cli --host 127.0.0.1 tui   # in another terminal
     """
+    if not 0 <= port <= 65535:
+        raise typer.BadParameter(
+            f"Port must be between 0 and 65535; got {port}.",
+            param_hint="'--port'",
+        )
     serve_mock(captures=captures, bind=bind, port=port)
 
 

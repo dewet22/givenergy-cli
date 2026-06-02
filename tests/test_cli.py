@@ -95,3 +95,15 @@ def test_mock_server_parses_args(monkeypatch):
     assert calls[0]["bind"] == "0.0.0.0"
     assert calls[0]["port"] == 9000
     assert [str(p) for p in calls[0]["captures"]] == [seed]
+
+
+def test_mock_server_port_out_of_range():
+    """A port outside 0-65535 is rejected with a clean bounds message."""
+    seed = "tests/fixtures/two_batteries.json"
+    r = runner.invoke(
+        cli.app,
+        ["mock-server", "--capture", seed, "--port", "99999"],
+        env={"COLUMNS": "200"},
+    )
+    assert r.exit_code != 0
+    assert "between 0 and 65535" in r.output

@@ -16,12 +16,12 @@ async def _serve(captures: list[Path], bind: str, port: int) -> None:
             "[yellow]Warning:[/yellow] no devices seeded — the capture(s) "
             "contained no decodable rx frames."
         )
-    host, bound_port = await mock.start(bind, port)
-    console.print(
-        f"Mock plant listening on [bold]{host}:{bound_port}[/bold] "
-        f"({len(mock.devices)} device(s) seeded). Press Ctrl+C to stop."
-    )
     try:
+        host, bound_port = await mock.start(bind, port)
+        console.print(
+            f"Mock plant listening on [bold]{host}:{bound_port}[/bold] "
+            f"({len(mock.devices)} device(s) seeded). Press Ctrl+C to stop."
+        )
         await mock.serve_forever()
     finally:
         await mock.aclose()
@@ -32,3 +32,6 @@ def serve_mock(captures: list[Path], bind: str, port: int) -> None:
         asyncio.run(_serve(captures, bind, port))
     except KeyboardInterrupt:
         Console().print("\nMock plant stopped.")
+    except OSError as exc:
+        Console().print(f"\n[red]Error:[/red] Failed to start mock server: {exc}")
+        raise SystemExit(1)
