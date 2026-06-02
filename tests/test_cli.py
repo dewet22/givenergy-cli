@@ -62,3 +62,48 @@ def test_base_out_of_range():
     )
     assert r.exit_code != 0
     assert "between 0 and 65535" in r.output
+
+
+def test_mock_server_requires_capture():
+    """--capture is mandatory."""
+    r = runner.invoke(cli.app, ["mock-server"], env={"COLUMNS": "200"})
+    assert r.exit_code != 0
+    assert "--capture" in r.output
+
+
+def test_mock_server_missing_file():
+    """A nonexistent capture path is rejected before the server starts."""
+    r = runner.invoke(
+        cli.app,
+        ["mock-server", "--capture", "does-not-exist.log"],
+        env={"COLUMNS": "200"},
+    )
+    assert r.exit_code != 0
+    assert "does not exist" in r.output
+
+
+def test_mock_server_parses_args(monkeypatch):
+    """Valid args are parsed and forwarded to serve_mock without starting a server."""
+    calls = []
+    monkeypatch.setattr(cli, "serve_mock", lambda **kw: calls.append(kw))
+    seed = "tests/fixtures/two_batteries.json"  # any existing file; never parsed here
+    r = runner.invoke(
+        cli.app,
+        ["mock-server", "--capture", seed, "--bind", "0.0.0.0", "--port", "9000"],
+    )
+    assert r.exit_code == 0, r.output
+    assert calls[0]["bind"] == "0.0.0.0"
+    assert calls[0]["port"] == 9000
+    assert [str(p) for p in calls[0]["captures"]] == [seed]
+
+
+def test_mock_server_port_out_of_range():
+    """A port outside 0-65535 is rejected with a clean bounds message."""
+    seed = "tests/fixtures/two_batteries.json"
+    r = runner.invoke(
+        cli.app,
+        ["mock-server", "--capture", seed, "--port", "99999"],
+        env={"COLUMNS": "200"},
+    )
+    assert r.exit_code != 0
+    assert "between 0 and 65535" in r.output

@@ -5,6 +5,7 @@ import typer
 
 from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
+from givenergy_cli.mock import serve_mock
 from givenergy_cli.registers import (
     export_plant,
     load_plant,
@@ -197,6 +198,44 @@ def inspect(
     """Reconstruct a plant from an exported JSON file and dump it."""
     plant = load_plant(path)
     show_plant(plant)
+
+
+@app.command("mock-server")
+def mock_server(
+    captures: list[Path] = typer.Option(
+        ...,
+        "--capture",
+        "-c",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Capture .log file(s) to seed from (repeatable). Produced by `capture`.",
+    ),
+    bind: str = typer.Option(
+        "127.0.0.1",
+        "--bind",
+        help="Bind address (use 0.0.0.0 to expose on the LAN).",
+    ),
+    port: int = typer.Option(8899, "--port", help="Bind port."),
+    log_level: LogLevel = typer.Option(LogLevel.INFO, envvar="GIVENERGY_LOG_LEVEL"),
+) -> None:
+    """Serve a mock GivEnergy plant from recorded captures, for offline testing.
+
+    Replays one or more capture logs as a faithful in-memory plant that answers a
+    real client's detect/load_config/refresh sequence — point `tui` or `export` at
+    it with no hardware. Seed files come from the `capture` command.
+
+    Example:
+
+        givenergy-cli mock-server --capture plant.log
+        givenergy-cli --host 127.0.0.1 tui   # in another terminal
+    """
+    if not 0 <= port <= 65535:
+        raise typer.BadParameter(
+            f"Port must be between 0 and 65535; got {port}.",
+            param_hint="'--port'",
+        )
+    serve_mock(captures=captures, bind=bind, port=port, log_level=log_level.value)
 
 
 if __name__ == "__main__":
