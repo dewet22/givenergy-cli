@@ -79,6 +79,22 @@ uv run givenergy-cli inspect plant.json
 
 Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery model fields plus per-device raw register dumps (decimal + hex). No network required.
 
+### `mock-server` — serve a fake plant from recorded captures
+
+```bash
+uv run givenergy-cli mock-server --capture plant.log
+# then, in another terminal:
+uv run givenergy-cli --host 127.0.0.1 tui
+```
+
+Replays one or more `capture` logs as a faithful in-memory plant, answering a real client's `detect` / `load_config` / `refresh` sequence with synthesized, correct-CRC responses — so you can drive `tui`, `export`, or `probe` against it with no hardware. Reads of an absent register bank return the same error shape real hardware uses. Seed files come from the [`capture`](#capture--record-wire-frames-for-a-bug-report) command.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--capture` / `-c` | Capture `.log` file(s) to seed from (repeatable) | required |
+| `--bind` | Bind address (use `0.0.0.0` to expose on the LAN) | `127.0.0.1` |
+| `--port` | Bind port | `8899` |
+
 ## Environment variables
 
 | Variable                     | Subcommand | Default        |
@@ -93,9 +109,10 @@ Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery mod
 ```text
 givenergy_cli/
     __init__.py
-    __main__.py    — Typer entry point (tui / capture / probe / export / inspect subcommands)
+    __main__.py    — Typer entry point (tui / capture / probe / export / inspect / mock-server subcommands)
     app.py         — Textual TUI app
     capture.py     — frame-capture logic for bug reports
+    mock.py        — mock-plant server for offline testing
     registers.py   — export, load, and rich-formatted display of register dumps
 tests/
     fixtures/      — anonymised plant JSON fixtures (good + bad-enum cases)
