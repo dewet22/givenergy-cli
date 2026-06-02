@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__home-assistant__ha_call_read_tool",
+      "mcp__home-assistant__ha_search_entities",
+      "mcp__home-assistant__ha_search_tools",
+      "mcp__home-assistant__ha_get_entity"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
@@ -11,6 +19,17 @@
             "type": "command",
             "command": "uv run ruff check --fix \"$CLAUDE_TOOL_INPUT_FILE_PATH\" && uv run ruff format \"$CLAUDE_TOOL_INPUT_FILE_PATH\"",
             "statusMessage": "Linting and formatting..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/check-inbox.sh",
+            "statusMessage": "Checking coordination inbox..."
           }
         ]
       }

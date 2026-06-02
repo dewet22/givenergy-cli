@@ -139,3 +139,5 @@ dmypy.json
 # Scratch exports from manual `givenergy-cli export` runs — these contain real
 # serial numbers and aren't fixtures
 test*.json
+.claude/.inbox-seen
+.claude/handoffs/

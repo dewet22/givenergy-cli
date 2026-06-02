@@ -13,7 +13,20 @@ This agent owns `givenergy-cli` only. Two sibling repositories exist, each with 
 - **`givenergy-modbus`** — the Modbus TCP client and data model
 - **`givenergy-hass`** — the Home Assistant integration
 
-When a CLI change requires corresponding work in a sister repo, produce a **handoff markdown file** describing the expected outcome at the API boundary — not how the target agent should implement it. Stage handoff files under `.claude/handoffs/` and confirm with the user before treating them as sent.
+When a CLI change requires corresponding work in a sister repo, communicate via the **shared coordination inbox** at `/tmp/givenergy-coordination/`.
+
+### Coordination inbox protocol
+
+- **Filename format:** `<unix-epoch>-<recipient>-<description>.md`
+  - `recipient` is one of `cli`, `modbus`, or `hass`
+  - `description` is a brief slug, optionally referencing an issue (e.g. `mock-pdu-logging-#42`)
+  - Example: `1780409632-modbus-mock-pdu-logging.md`
+- **Writing a message:** create a new file; never mutate an existing one
+- **Replying:** create a new file with the current epoch, the original recipient as addressee, and a description prefixed with `re-`
+- **Content:** describe the expected outcome at the API boundary — not how to implement it; include enough context to act without this conversation's history
+- **Scanning:** after every turn, scan the inbox for new `*-cli-*.md` files and act on any that haven't been seen (the Stop hook in `.claude/settings.json` does this automatically)
+
+The old `.claude/handoffs/` location is superseded by this inbox.
 
 ## Tooling
 
