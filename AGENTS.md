@@ -51,7 +51,11 @@ Do not use `uvx`, system-installed binaries, or `pip` for project tooling — ev
 
 ## Pre-commit hooks
 
-Pre-commit runs automatically on `git commit` and includes ruff, mypy, bandit, and several other linters. Fix failures rather than skipping hooks (`--no-verify`). If a commit fails due to a hook, fix the issue and create a new commit — do not amend the previous one.
+Hooks run automatically on `git commit` via **`prek`** (a Rust pre-commit framework), configured in `prek.toml` — not `.pre-commit-config.yaml`. Run them manually with `prek run`. The set includes ruff (`--fix`) + ruff-format, mypy, bandit (`--exclude=tests`), codespell, and the pre-commit-hooks/pygrep batteries. Fix failures rather than skipping hooks (`--no-verify`). If a commit fails due to a hook, fix the issue and create a new commit — do not amend the previous one.
+
+Two hooks have bitten us before:
+- **`name-tests-test --django`** requires test files to be named `test_*.py` (not `*_test.py`).
+- **`codespell`** flags `hass` → `hash`; project-specific terms are allow-listed in `.codespellrc` — add to `ignore-words-list` there rather than rewording legitimate uses.
 
 ## Commits and branches
 
@@ -67,7 +71,13 @@ Releases are triggered via GitHub Actions `workflow_dispatch` — not by pushing
 gh workflow run release.yml --field bump=<major|minor|patch>
 ```
 
-The workflow handles versioning, CHANGELOG generation, tagging, building, and publishing to PyPI.
+The workflow handles versioning, CHANGELOG generation, tagging, building, and publishing to PyPI. Preview the generated CHANGELOG section before triggering with:
+
+```bash
+uv run python scripts/release.py generate <next-version> --preview
+```
+
+For multi-commit work accumulated on `main`, prefer a PR-based review flow over a direct release.
 
 ## GitHub identity — bot vs your voice
 
@@ -118,6 +128,14 @@ Ruff will enforce this form. Ignore reviewer suggestions to parenthesise it.
 - Broad `except Exception` clauses should carry `# noqa: BLE001` to match the project convention.
 - The `_silence_shutdown_noise()` context manager in `registers.py` must wrap any `asyncio.run()` call that closes a `Client` — the modbus shutdown emits noisy CRITICAL log lines otherwise.
 - Client lifecycle: always close in a `try/finally` block.
+
+## Testing
+
+Tests live in `tests/test_*.py` and run with `uv run pytest` (no coverage plugin installed — `--cov` will error). CLI commands are tested with `typer.testing.CliRunner`:
+
+- **Monkeypatch the delegating function** (e.g. `cli.probe_registers`, `cli.serve_mock`) rather than opening real connections — patch the name imported into `__main__`, and assert on the recorded kwargs. Set `env={"GIVENERGY_HOST": "127.0.0.1"}` when the command requires a host.
+- **When asserting on rich-rendered error text**, pass `env={"COLUMNS": "200"}` — otherwise rich wraps the message across the error-panel border at 80 cols and substring matches fail.
+- `.codacy.yaml` excludes `tests/**` from static analysis (Codacy's bandit flags pytest `assert` as B101); this mirrors prek's `bandit --exclude=tests`. Don't weaken test asserts to appease it.
 
 ## Hardware context
 
