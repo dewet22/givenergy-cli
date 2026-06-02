@@ -17,16 +17,17 @@ When a CLI change requires corresponding work in a sister repo, communicate via 
 
 ### Coordination inbox protocol
 
+- **Shared directory:** `/tmp/givenergy-coordination`
 - **Filename format:** `<unix-epoch>-<recipient>-<description>.md`
   - `recipient` is one of `cli`, `modbus`, or `hass`
   - `description` is a brief slug, optionally referencing an issue (e.g. `mock-pdu-logging-#42`)
   - Example: `1780409632-modbus-mock-pdu-logging.md`
 - **Writing a message:** create a new file; never mutate an existing one
-- **Replying:** create a new file with the current epoch, the original recipient as addressee, and a description prefixed with `re-`
-- **Content:** describe the expected outcome at the API boundary — not how to implement it; include enough context to act without this conversation's history
-- **Scanning:** after every turn, scan the inbox for new `*-cli-*.md` files and act on any that haven't been seen (the Stop hook in `.claude/settings.json` does this automatically)
+- **Replying:** create a new file with the current epoch, the original sender as addressee, and a description prefixed with `re-`. Only reply if actionable, save on pleasantries.
+- **Content:** describe the expected outcome at the API boundary — not how to implement it; include enough context to act without this conversation's history. It does not need to be overly verbose since agents share a lot of common knowledge across these repos.
+- **Scanning:** after every turn, scan the inbox for new files through the stop hook and script defined in `.claude/settings.json`; make a decision whether to immediately act on the message, park it for when the current work winds up, or handing off to a subagent. Check with the user if any uncertainty.
 
-The old `.claude/handoffs/` location is superseded by this inbox.
+The old `.claude/handoffs/` and bare `/tmp` locations are superseded by this inbox.
 
 ## Tooling
 
@@ -67,6 +68,38 @@ gh workflow run release.yml --field bump=<major|minor|patch>
 ```
 
 The workflow handles versioning, CHANGELOG generation, tagging, building, and publishing to PyPI.
+
+## GitHub identity — bot vs your voice
+
+GitHub interactions split into two identities. The rule of thumb: **anything that
+publishes prose as the user goes out under their keyring auth; mechanical, structural,
+and read-only actions go out under the automation bot.**
+
+- **Git pushes are unaffected** — git uses SSH, so commits/pushes always go under the
+  user's key regardless of token. This split only governs `gh` / `gh api` calls.
+- `gh` token precedence is `GH_TOKEN` > `GITHUB_TOKEN` > keyring.
+
+**Bot identity (autonomous)** — run as plain `gh …`. Picks up `GH_TOKEN` from the repo's
+`.envrc` when provisioned; falls back harmlessly to keyring if not. Covers:
+- All reads: `gh pr checks/view/list/diff`, `gh run list/view/watch`, `gh api` GETs,
+  `gh issue/release/repo view/list`, `gh search`
+- `gh workflow run` (release trigger)
+- `gh pr merge`
+- Resolving review threads (GraphQL `resolveReviewThread`)
+- Labels (`gh label`, `gh pr edit --add-label`)
+
+**Your voice (the user)** — force keyring auth by prefixing with
+`env -u GH_TOKEN -u GITHUB_TOKEN gh …`, so it pins to the user regardless of any bot
+token in the environment. Covers anything that authors prose as the user:
+- Review-thread replies (`gh api …/comments/…/replies`)
+- `gh pr comment` / `gh issue comment`
+- PR review submissions (`gh pr review`)
+- `gh pr create` (title/body are prose authored as the user)
+- `gh issue create`, closing with a comment
+- Editing PR/issue descriptions
+
+The bot PAT needs `repo` (read, merge, labels) and `workflow` (trigger releases) scopes.
+This is a shared cross-agent convention — the modbus and hass agents follow the same split.
 
 ## Python version notes
 
