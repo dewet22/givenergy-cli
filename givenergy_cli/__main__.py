@@ -217,6 +217,7 @@ def mock_server(
         help="Bind address (use 0.0.0.0 to expose on the LAN).",
     ),
     port: int = typer.Option(8899, "--port", help="Bind port."),
+    log_level: LogLevel = typer.Option(LogLevel.INFO, envvar="GIVENERGY_LOG_LEVEL"),
 ) -> None:
     """Serve a mock GivEnergy plant from recorded captures, for offline testing.
 
@@ -234,7 +235,7 @@ def mock_server(
             f"Port must be between 0 and 65535; got {port}.",
             param_hint="'--port'",
         )
-    serve_mock(captures=captures, bind=bind, port=port)
+    serve_mock(captures=captures, bind=bind, port=port, log_level=log_level.value)
 
 
 if __name__ == "__main__":

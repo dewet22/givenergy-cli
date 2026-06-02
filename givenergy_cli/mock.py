@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from rich.console import Console
@@ -27,7 +28,10 @@ async def _serve(captures: list[Path], bind: str, port: int) -> None:
         await mock.aclose()
 
 
-def serve_mock(captures: list[Path], bind: str, port: int) -> None:
+def serve_mock(
+    captures: list[Path], bind: str, port: int, log_level: str = "INFO"
+) -> None:
+    logging.basicConfig(level=log_level)
     try:
         asyncio.run(_serve(captures, bind, port))
     except KeyboardInterrupt:
