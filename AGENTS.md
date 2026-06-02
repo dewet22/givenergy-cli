@@ -78,9 +78,10 @@ and read-only actions go out under the automation bot.**
 - **Git pushes are unaffected** — git uses SSH, so commits/pushes always go under the
   user's key regardless of token. This split only governs `gh` / `gh api` calls.
 - `gh` token precedence is `GH_TOKEN` > `GITHUB_TOKEN` > keyring.
+- Bot identity is `dewet22-claude`; the user's keyring identity is `dewet22`.
 
-**Bot identity (autonomous)** — run as plain `gh …`. Picks up `GH_TOKEN` from the repo's
-`.envrc` when provisioned; falls back harmlessly to keyring if not. Covers:
+**Bot identity (autonomous)** — prefix with `source "$CLAUDE_CONFIG_DIR/gh-env" &&` to
+load the bot `GH_TOKEN`, e.g. `source "$CLAUDE_CONFIG_DIR/gh-env" && gh pr merge 35`. Covers:
 - All reads: `gh pr checks/view/list/diff`, `gh run list/view/watch`, `gh api` GETs,
   `gh issue/release/repo view/list`, `gh search`
 - `gh workflow run` (release trigger)
@@ -98,8 +99,9 @@ token in the environment. Covers anything that authors prose as the user:
 - `gh issue create`, closing with a comment
 - Editing PR/issue descriptions
 
-The bot PAT needs `repo` (read, merge, labels) and `workflow` (trigger releases) scopes.
-This is a shared cross-agent convention — the modbus and hass agents follow the same split.
+The bot token lives at `$CLAUDE_CONFIG_DIR/gh-env` (`export GH_TOKEN=…`) and needs `repo`
+(read, merge, labels) and `workflow` (trigger releases) scopes. This is a shared
+cross-agent convention — the modbus and hass agents follow the same split.
 
 ## Python version notes
 
