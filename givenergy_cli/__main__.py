@@ -77,12 +77,18 @@ def export(
         dir_okay=False,
         writable=True,
     ),
+    redact: bool = typer.Option(
+        True,
+        "--redact/--no-redact",
+        help="Redact serial numbers for share-safe output (default). Use --no-redact for raw data.",
+    ),
 ) -> None:
     """Capture a full register dump from the inverter into a portable JSON file."""
     export_plant(
         host=_require_host(ctx),
         port=ctx.obj["port"],
         output=output,
+        redact=redact,
     )
 
 
