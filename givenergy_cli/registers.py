@@ -13,6 +13,7 @@ from rich.table import Table
 
 from givenergy_modbus.client.client import Client
 from givenergy_modbus.exceptions import RefreshFailed, RefreshPartiallySucceeded
+from givenergy_modbus.model.register import Converter
 from givenergy_modbus.model.battery import Battery, BatteryRegisterGetter
 from givenergy_modbus.model.ems import Ems
 from givenergy_modbus.model.gateway import GatewayV1, GatewayV2
@@ -113,7 +114,7 @@ async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
     return client.plant, error
 
 
-def export_plant(host: str, port: int, output: Path) -> None:
+def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> None:
     console = Console()
     console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
     with _silence_shutdown_noise():
@@ -121,11 +122,21 @@ def export_plant(host: str, port: int, output: Path) -> None:
     if error:
         console.print(f"[yellow]Warning:[/yellow] {error}")
     payload = {
-        "inverter_serial_number": plant.inverter_serial_number,
-        "data_adapter_serial_number": plant.data_adapter_serial_number,
+        "inverter_serial_number": (
+            Converter.redact_serial(plant.inverter_serial_number)
+            if redact
+            else plant.inverter_serial_number
+        ),
+        "data_adapter_serial_number": (
+            Converter.redact_serial(plant.data_adapter_serial_number)
+            if redact
+            else plant.data_adapter_serial_number
+        ),
         "capabilities": plant.capabilities.to_dict() if plant.capabilities else None,
         "register_caches": {
-            f"0x{addr:02x}": _serialise_cache(cache)
+            f"0x{addr:02x}": _serialise_cache(
+                cache.redact_serials() if redact else cache
+            )
             for addr, cache in plant.register_caches.items()
             if cache
         },
@@ -138,9 +149,10 @@ def export_plant(host: str, port: int, output: Path) -> None:
         if plant.capabilities
         else ""
     )
+    redact_note = " · serials redacted" if redact else ""
     console.print(
         f"Wrote [bold]{total}[/bold] registers across "
-        f"[bold]{len(populated)}[/bold] device address(es){caps_note} "
+        f"[bold]{len(populated)}[/bold] device address(es){caps_note}{redact_note} "
         f"to [cyan]{output}[/cyan]"
     )
 
