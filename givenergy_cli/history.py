@@ -80,8 +80,10 @@ class PlantSnapshot:
 
     @property
     def out_total(self) -> float:
-        """Power leaving the inverter (sinks side)."""
-        return self.load + self.eps + max(0.0, self.grid) + max(0.0, -self.battery)
+        """Power leaving the inverter (sinks side). ``load`` (p_load_demand)
+        already includes the EPS branch — corpus-confirmed — so ``eps`` is
+        not added on top."""
+        return self.load + max(0.0, self.grid) + max(0.0, -self.battery)
 
     @property
     def imbalance(self) -> float:
@@ -116,7 +118,11 @@ class EnergyCounters:
     e_pv2_day: float | None
     e_grid_in_day: float | None
     e_grid_out_day: float | None
-    e_load_day: float | None
+    # House consumption today. On single-phase this is the library's derived
+    # e_consumption_today (the GE-app formula recovered in modbus #174 — the
+    # old IR(35) "e_load_day" was a mislabel and actually backs AC-charge);
+    # three-phase units meter it natively as e_load_today.
+    e_consumption_day: float | None
     e_battery_charge_day: float | None
     e_battery_discharge_day: float | None
 
@@ -138,13 +144,12 @@ class EnergyCounters:
             e_pv2_day=inv.e_pv2_day,
             e_grid_in_day=inv.e_grid_in_day,
             e_grid_out_day=inv.e_grid_out_day,
-            # givenergy-modbus 2.2 reworked the register LUTs: e_load_day was
-            # dropped (no successor field) and the battery day counters were
-            # renamed to *_today_alt1 (same IR(36)/IR(37) registers as the old
-            # names). Fall back so the energy ring keeps working on both lines;
-            # absent fields become None, which every consumer already renders
-            # as "—".
-            e_load_day=_first_field(inv, "e_load_day"),
+            # Field-name bridges across givenergy-modbus versions: the battery
+            # day counters became *_today_alt1 in the 2.2 LUT rework (same
+            # IR(36)/IR(37) registers); consumption is e_consumption_today
+            # (single-phase, derived) or e_load_today (three-phase, metered).
+            # Absent fields become None, which every consumer renders as "—".
+            e_consumption_day=_first_field(inv, "e_consumption_today", "e_load_today"),
             e_battery_charge_day=_first_field(
                 inv, "e_battery_charge_day", "e_battery_charge_today_alt1"
             ),
@@ -174,10 +179,14 @@ class EnergyCounters:
 
     @property
     def cum_out(self) -> float | None:
-        """Cumulative energy leaving the inverter to all sinks (load + grid
-        export + battery charge). EPS is implicitly included in `e_load_day`
-        on single-phase. Same midnight-reset caveat as :attr:`cum_in`."""
-        a, b, c = self.e_load_day, self.e_grid_out_total, self.e_battery_charge_day
+        """Cumulative energy leaving the inverter to all sinks (consumption +
+        grid export + battery charge). EPS is included in the consumption
+        figure. Same midnight-reset caveat as :attr:`cum_in`."""
+        a, b, c = (
+            self.e_consumption_day,
+            self.e_grid_out_total,
+            self.e_battery_charge_day,
+        )
         if a is None or b is None or c is None:
             return None
         return a + b + c

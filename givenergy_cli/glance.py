@@ -151,12 +151,16 @@ class GlancePanel(Static):
             f"{_per_battery_line(batteries)}"
         )
 
-        # givenergy-modbus 2.2 dropped the e_load_day counter with no successor,
-        # so the house figure shows instantaneous demand rather than a daily
-        # total (imported/exported today still appear in the chip row).
-        load = (inv.p_load_demand or 0) / 1000.0
+        # House consumption today: e_consumption_today on single-phase (the
+        # GE-app-derived figure; the old IR(35) "e_load_day" was a mislabel),
+        # e_load_today metered natively on three-phase.
+        consumption = getattr(
+            inv, "e_consumption_today", getattr(inv, "e_load_today", None)
+        )
         self.query_one("#glance-house", Static).update(
-            f"[dim]HOME · NOW[/dim]\n\n[bold]{load:.2f}[/bold] kW\n\n{_grid_line(inv)}"
+            f"[dim]HOUSE TODAY[/dim]\n\n"
+            f"[bold]{_kwh(consumption)}[/bold] kWh\n\n"
+            f"{_grid_line(inv)}"
         )
 
         chips = [

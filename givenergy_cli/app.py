@@ -514,9 +514,10 @@ class Topology(Static):
         # at col 56 branching up to Load and down to EPS. The kW number is
         # already in the Load and EPS boxes themselves; the trunk's job is to
         # convey magnitude via animation speed.
-        # p_load_demand is sensed at the busbar and includes the EPS branch —
-        # same semantics as e_load_day on the energy side — so the trunk
-        # carries `load` and the Loads box shows the house-only remainder.
+        # p_load_demand is sensed at the busbar and includes the EPS branch
+        # (confirmed against the modbus capture corpus: (IR24−IR30)−IR42 sits
+        # at ~0 with EPS active), so the trunk carries `load` and the Loads
+        # box shows the house-only remainder.
         total_out = load
         load = max(load - eps, 0.0)
         out_c = self._C_LOAD if total_out > idle else DIM
@@ -736,10 +737,10 @@ class EnergyBalance(Static):
         bat_out = max(0.0, battery)
         bat_in = max(0.0, -battery)
         in_total = pv + grid_in + bat_out
-        # p_load_demand includes the EPS branch (busbar-sensed, mirroring the
-        # documented e_load_day semantics), so EPS is shown as an "of which"
-        # row rather than added on top — adding it double-counted ~all of EPS
-        # in the imbalance figure.
+        # p_load_demand includes the EPS branch (busbar-sensed; confirmed from
+        # the modbus capture corpus), so EPS is shown as an "of which" row
+        # rather than added on top — adding it double-counted ~all of EPS in
+        # the imbalance figure.
         out_total = load + grid_out + bat_in
         # Signed imbalance — not the same as conversion losses. The register
         # banks aren't read atomically by the inverter, so individual flows
@@ -866,7 +867,7 @@ class EnergyBalance(Static):
             pv_day = latest.pv_day
             gi_day = latest.e_grid_in_day
             go_day = latest.e_grid_out_day
-            load_day = latest.e_load_day
+            load_day = latest.e_consumption_day
             bc_day = latest.e_battery_charge_day
             bd_day = latest.e_battery_discharge_day
 
