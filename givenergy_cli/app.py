@@ -26,7 +26,11 @@ from textual.widgets import (
 )
 
 from givenergy_modbus.client.client import Client
-from givenergy_modbus.exceptions import CommunicationError
+from givenergy_modbus.exceptions import (
+    CommunicationError,
+    RefreshFailed,
+    RefreshPartiallySucceeded,
+)
 from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
@@ -1051,6 +1055,11 @@ class GivEnergyApp(App):
             await self.client.refresh()
             self._last_refresh_at = datetime.now()
             self._snapshot()
+        except RefreshPartiallySucceeded as exc:
+            # Flaky first refresh — keep the partial data that was committed.
+            modbus_logger.warning("Startup refresh incomplete: %s", exc)
+            self._last_refresh_at = datetime.now()
+            self._snapshot()
         except Exception as exc:  # noqa: BLE001
             modbus_logger.error(
                 "Startup failed: %r — will retry from periodic tick", exc
@@ -1082,7 +1091,14 @@ class GivEnergyApp(App):
             if full:
                 await self.client.load_config()
             await self.client.refresh()
-        except TimeoutError:
+        except RefreshPartiallySucceeded:
+            # Some reads failed — routine on this hardware. Whatever succeeded
+            # has already been committed to the plant, so treat it as a refresh;
+            # the library logs the per-read failures at WARNING for the log panel.
+            self._last_refresh_at = datetime.now()
+            self._snapshot()
+        except RefreshFailed, TimeoutError:
+            # Nothing usable this tick — keep showing the previous data.
             pass
         else:
             self._last_refresh_at = datetime.now()

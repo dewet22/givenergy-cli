@@ -93,3 +93,58 @@ def test_tui_tabs_smoke(monkeypatch):
             assert tabs.active == "glance-tab"
 
     asyncio.run(drive())
+
+
+def test_tui_survives_partial_refresh(monkeypatch):
+    """RefreshPartiallySucceeded from refresh() is routine flaky-hardware
+    behaviour: the tick must keep the committed partial data, not crash the
+    worker (this escaped as a TUI error screen before being handled)."""
+    from givenergy_modbus.exceptions import RefreshPartiallySucceeded
+
+    import givenergy_cli.app as app_mod
+
+    class FakeClient:
+        def __init__(self, host, port):
+            from givenergy_modbus.model.plant import Plant
+
+            self.plant = Plant()
+            self.connected = True
+
+        async def connect(self):
+            pass
+
+        async def detect(self, **kw):
+            return None
+
+        async def load_config(self, **kw):
+            pass
+
+        async def refresh(self, **kw):
+            raise RefreshPartiallySucceeded(
+                "3 of 4 register reads failed",
+                plant=self.plant,
+                failures=[],
+                cause=ExceptionGroup("reads", [TimeoutError()]),
+            )
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def drive():
+        app = app_mod.GivEnergyApp(host="127.0.0.1", refresh_interval=3600)
+        async with app.run_test() as pilot:
+            # Startup path: on_mount's refresh raised partial — app must be up
+            # and have recorded the (partial) refresh rather than failing.
+            await pilot.pause(0.2)
+            assert app._last_refresh_at is not None
+            first = app._last_refresh_at
+            # Periodic path: drive another partial refresh through the worker.
+            app._periodic_refresh()
+            await pilot.pause(0.2)
+            assert app._last_refresh_at is not None
+            assert app._last_refresh_at >= first
+            assert app.is_running
+
+    asyncio.run(drive())
