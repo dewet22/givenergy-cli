@@ -15,21 +15,28 @@ import givenergy_cli.capture as capture
 
 
 class FakeClient:
-    def __init__(self, *, frames=(), then="complete", connect_raises=False):
+    def __init__(
+        self, *, frames=(), then="complete", connect_raises=False, connect_delay=0.0
+    ):
         self.frames = frames
         self.then = then  # "drop" | "quiet" | "complete"
         self.connect_raises = connect_raises
+        self.connect_delay = connect_delay
         self.connected = False
         self.closed = False
+        self.capture_called = False
         # Mirrors the real Client.plant attribute the watchdog reads.
         self.plant = SimpleNamespace(register_block_updated_at={})
 
     async def connect(self):
+        if self.connect_delay:
+            await asyncio.sleep(self.connect_delay)
         if self.connect_raises:
             raise OSError("connect refused")
         self.connected = True
 
     async def capture_frames(self, sink, duration):
+        self.capture_called = True
         for frame in self.frames:
             sink("rx", frame)
         if self.then == "drop":
@@ -116,6 +123,20 @@ def test_retries_failed_connect(monkeypatch, tmp_path):
     assert markers == []
     assert fakes[0].closed is False  # never connected
     assert fakes[1].closed is True
+
+
+def test_slow_connect_respects_deadline(monkeypatch, tmp_path):
+    """A connect that outlasts the remaining budget doesn't start a segment past
+    the deadline (the -d wall-clock guarantee excludes connect time)."""
+    fake = FakeClient(frames=[b"\x99"], then="complete", connect_delay=0.05)
+    _install(monkeypatch, [fake])
+    out = tmp_path / "frames.log"
+
+    count = asyncio.run(capture._run("h", 1, out, duration=0.02, reconnect_after=0.0))
+
+    assert count == 0
+    assert fake.capture_called is False  # deadline passed during connect
+    assert fake.closed is True  # but the connection was still closed
 
 
 def test_single_segment_no_markers(monkeypatch, tmp_path):

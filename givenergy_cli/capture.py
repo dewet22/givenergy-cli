@@ -110,11 +110,23 @@ async def _run(
                 await client.connect()
             except _CONNECT_ERRORS:
                 # Couldn't (re)establish the connection — back off and retry until
-                # the deadline. Any gap is recorded once we resume. Nothing to
-                # close: a failed connect leaves no open reader/writer.
-                await asyncio.sleep(min(backoff, max(remaining, 0.0)))
+                # the deadline. Recompute the budget first: a slow connect attempt
+                # may have eaten into it. Nothing to close on a failed connect.
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(backoff, remaining))
                 backoff = min(backoff * 2, _BACKOFF_CAP)
                 continue
+
+            # connect() can take up to the connect timeout, so recompute the budget
+            # before capturing: the segment length (and the -d wall-clock guarantee)
+            # must exclude connect time, and a reconnect near the deadline must not
+            # start a fresh segment past it.
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                await client.close()
+                break
 
             reason: str | None = None
             try:
