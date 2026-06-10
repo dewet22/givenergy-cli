@@ -29,6 +29,12 @@ jobs:
             echo "::error::no version supplied via client_payload.version or workflow inputs"
             exit 1
           fi
+          # client_payload arrives from any token with write access — assert the
+          # shape once here rather than relying on downstream parsing to reject it.
+          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::version '$NEW' does not look like a PEP 440 release (X.Y.Z with optional a/b/rc suffix)"
+            exit 1
+          fi
           # Route the PR to the branch whose dependency range that major
           # version belongs to. Update the case statement when a new release
           # branch (and/or new modbus major) is introduced.
@@ -44,11 +50,11 @@ jobs:
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           echo "base=$base" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ steps.ver.outputs.base }}
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
 
