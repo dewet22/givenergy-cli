@@ -63,6 +63,12 @@ def tui(
         help="Ignore the cached plant topology and run a full detect on startup "
         "(also refreshes the cache). Use after changing hardware.",
     ),
+    allow_writes: bool = typer.Option(
+        False,
+        "--allow-writes",
+        help="Enable the Controls view to send commands to the inverter. Off by "
+        "default — without it, Controls is read-only.",
+    ),
 ) -> None:
     """Launch the interactive TUI."""
     GivEnergyApp(
@@ -71,6 +77,7 @@ def tui(
         refresh_interval=refresh_interval,
         log_level=log_level.value,
         redetect=redetect,
+        allow_writes=allow_writes,
     ).run()
 
 

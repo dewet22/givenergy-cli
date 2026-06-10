@@ -31,11 +31,12 @@ After `uv sync` the `givenergy-cli` command is available at `.venv/bin/givenergy
 uv run givenergy-cli --host 192.168.x.x tui
 ```
 
-Three views, mirroring the layout of the companion Home Assistant dashboards, plus a modbus log panel and a status bar showing connection state and the time of the last refresh:
+Four views, mirroring the layout of the companion Home Assistant dashboards, plus a modbus log panel and a status bar showing connection state and the time of the last refresh:
 
 - **Glance** (default) — headline summary: a flow-status sentence, Solar today / Battery SOC / Home now figures, and a chip row with per-battery SOC and today's import/export.
 - **Flow** — three "now" tiles above the animated power-flow topology.
 - **Analyst** — the data-heavy widgets: energy balance ledger, Inverter panel (with collapsible Charge/Discharge Slot sections), and Battery panel.
+- **Controls** — send commands to the inverter: enable/disable charge & discharge, charge target SOC, SOC reserve, and charge/discharge time slots. Everyday changes apply immediately (mirroring the app); the disruptive operations (reboot, SOC recalibration) require typing a confirmation token. **Read-only unless the TUI is launched with `--allow-writes`.** Single-phase inverters only for now — three-phase and EMS use different write paths that haven't been implemented or hardware-tested, so those models get a notice instead of controls.
 
 The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
 
@@ -43,7 +44,7 @@ The plant topology is detected once and cached per host, so subsequent launches 
 
 | Key       | Action                                                       |
 |-----------|--------------------------------------------------------------|
-| `1` / `2` / `3` | Switch view: Glance / Flow / Analyst                    |
+| `1`–`4`   | Switch view: Glance / Flow / Analyst / Controls              |
 | `r`       | Refresh now (re-reads instantaneous measurements)            |
 | `Shift+R` | Full refresh — also re-reads the holding-register config blocks |
 | `l`       | Toggle the modbus log panel                                  |

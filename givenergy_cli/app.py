@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from rich.markup import escape
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -36,6 +36,7 @@ from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 
 from givenergy_cli import capabilities_cache
+from givenergy_cli.controls import ConfirmModal, ControlsPanel, Requests
 from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
@@ -157,7 +158,7 @@ class InverterPanel(PlantPanel):
         ("status", "Status", lambda inv, p: str(inv.status)),
         ("heatsink", "Heatsink", lambda inv, p: f"{inv.t_inverter_heatsink} °C"),
         ("charger", "Charger", lambda inv, p: f"{inv.t_charger} °C"),
-        ("uptime", "Uptime", lambda inv, p: f"{inv.work_time_total} h"),
+        ("uptime", "Uptime", lambda inv, p: f"{inv.work_time_total_hours} h"),
     ]
     _SECTIONS: ClassVar[list[tuple[str, list[tuple[str, str, Getter]]]]] = [
         (
@@ -998,9 +999,21 @@ class GivEnergyApp(App):
         Binding("1", "show_glance", "Glance"),
         Binding("2", "show_flow", "Flow"),
         Binding("3", "show_analyst", "Analyst"),
+        Binding("4", "show_controls", "Controls"),
+        # Modifier cycle works even while a text input has focus (the digit
+        # shortcuts get typed into the field instead of switching tabs).
+        # Input binds ctrl+left/right for word nav, so use pageup/down.
+        Binding("ctrl+pagedown", "next_tab", "Next view"),
+        Binding("ctrl+pageup", "prev_tab", "Prev view", show=False),
         Binding("l", "toggle_log", "Logs"),
-        # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
+    ]
+
+    _TAB_IDS: ClassVar[list[str]] = [
+        "glance-tab",
+        "flow-tab",
+        "analyst-tab",
+        "controls-tab",
     ]
 
     SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -1015,11 +1028,13 @@ class GivEnergyApp(App):
         refresh_interval: float = 15.0,
         log_level: str = "WARNING",
         redetect: bool = False,
+        allow_writes: bool = False,
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
         self._redetect = redetect
+        self._allow_writes = allow_writes
         self.client = Client(host=host, port=port)
         self.refresh_interval = refresh_interval
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
@@ -1058,6 +1073,8 @@ class GivEnergyApp(App):
                     with Vertical(id="analyst-right"):
                         yield InverterPanel()
                         yield BatteryPanel()
+            with TabPane("Controls", id="controls-tab"):
+                yield ControlsPanel(allow_writes=self._allow_writes, id="controls")
         yield RichLog(id="log-panel", highlight=True, markup=True)
         with Horizontal(id="status-bar"):
             yield Label("", id="last-refresh")
@@ -1217,6 +1234,7 @@ class GivEnergyApp(App):
         self.query_one(EnergyBalance).refresh_from(plant)
         self.query_one(InverterPanel).refresh_from(plant)
         self.query_one(BatteryPanel).refresh_from(plant)
+        self.query_one(ControlsPanel).refresh_from(plant)
 
     def _tick_status_bar(self) -> None:
         status = self.query_one(ConnectionStatus)
@@ -1273,7 +1291,65 @@ class GivEnergyApp(App):
     def action_show_analyst(self) -> None:
         self.query_one(TabbedContent).active = "analyst-tab"
 
-    # async def action_calibrate(self) -> None:
-    #     if self.client.connected:
-    #         await self.client.one_shot_command(commands.set_calibrate_battery_soc())
-    #         self.notify("Battery SOC calibration initiated.")
+    def action_show_controls(self) -> None:
+        self.query_one(TabbedContent).active = "controls-tab"
+
+    def _cycle_tab(self, step: int) -> None:
+        tabs = self.query_one(TabbedContent)
+        try:
+            i = self._TAB_IDS.index(tabs.active)
+        except ValueError:
+            i = 0
+        tabs.active = self._TAB_IDS[(i + step) % len(self._TAB_IDS)]
+
+    def action_next_tab(self) -> None:
+        self._cycle_tab(1)
+
+    def action_prev_tab(self) -> None:
+        self._cycle_tab(-1)
+
+    # --- write command execution (Controls view) -----------------------------
+
+    @on(ControlsPanel.Apply)
+    def _on_control_apply(self, message: ControlsPanel.Apply) -> None:
+        if not self._allow_writes:
+            return
+        # Freeze the control until the write resolves, so the 1 s read-back
+        # doesn't briefly flip it back to the pre-write value.
+        self.query_one(ControlsPanel).freeze(message.control_id)
+        self._send_command(message.requests, message.label, message.control_id)
+
+    @on(ControlsPanel.Dangerous)
+    async def _on_control_dangerous(self, message: ControlsPanel.Dangerous) -> None:
+        if not self._allow_writes:
+            return
+        confirmed = await self.push_screen_wait(
+            ConfirmModal(message.prompt, message.token)
+        )
+        if confirmed:
+            # Maintenance buttons aren't stateful controls — nothing to freeze.
+            self._send_command(message.requests, message.label, None)
+
+    @work
+    async def _send_command(
+        self, requests: Requests, label: str, control_id: str | None
+    ) -> None:
+        """Execute a write command list and report the outcome to the log panel.
+        The originating control is flashed green/red and unfrozen when the write
+        resolves."""
+        logger = logging.getLogger("givenergy_modbus")
+        ok = False
+        try:
+            await self.client.one_shot_command(requests)
+        except Exception as exc:  # noqa: BLE001 — surface any write failure, don't crash
+            logger.warning("write failed (%s): %r", label, exc)
+            self.notify(f"Write failed: {label}", severity="error", timeout=5)
+        else:
+            ok = True
+            logger.info("applied: %s", label)
+            # Re-read so the panels reflect the new state promptly.
+            self._next_refresh_full = True
+            self._periodic_refresh()
+        finally:
+            if control_id is not None:
+                self.query_one(ControlsPanel).write_finished(control_id, ok)
