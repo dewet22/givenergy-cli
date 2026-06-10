@@ -9,7 +9,7 @@ from rich.console import Console
 
 from givenergy_modbus.client.client import Client
 
-from givenergy_cli.registers import _silence_shutdown_noise
+from givenergy_cli.registers import _open_private, _silence_shutdown_noise
 
 
 async def _run(host: str, port: int, output: Path, duration: float) -> int:
@@ -17,7 +17,7 @@ async def _run(host: str, port: int, output: Path, duration: float) -> int:
     count = 0
     try:
         await client.connect()
-        with output.open("w") as f:
+        with _open_private(output) as f:
 
             def write_line(direction: Literal["rx", "tx"], frame: bytes) -> None:
                 nonlocal count

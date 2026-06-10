@@ -251,3 +251,32 @@ def test_model_table_escapes_markup():
     # If markup were interpreted, the tags would be consumed by the renderer.
     assert "[red]evil[/red]" in text
     assert "[link=" in text
+
+
+def test_export_writes_owner_only_permissions(monkeypatch, tmp_path):
+    """export_plant creates the output file rw------- (owner-only)."""
+    import os
+    import stat
+
+    from givenergy_modbus.model.plant import Plant
+
+    from givenergy_cli.registers import export_plant
+
+    plant = Plant()
+
+    async def _fake_capture(host: str, port: int):
+        return plant, None
+
+    monkeypatch.setattr("givenergy_cli.registers._capture", _fake_capture)
+
+    out = tmp_path / "plant.json"
+    # Pre-create world-readable to confirm an existing file is tightened too.
+    out.write_text("{}")
+    out.chmod(0o644)
+
+    export_plant(host="127.0.0.1", port=8899, output=out, redact=True)
+
+    # Windows doesn't map POSIX permission bits, so only assert on Unix.
+    if os.name != "nt":
+        mode = stat.S_IMODE(os.stat(out).st_mode)
+        assert mode == 0o600, oct(mode)

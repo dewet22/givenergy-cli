@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
@@ -79,6 +80,25 @@ def _silence_shutdown_noise() -> Iterator[None]:
         logger.removeFilter(flt)
 
 
+def _open_private(path: Path):
+    """Open *path* for writing with owner-only permissions (rw-------).
+
+    Export/capture files can contain hardware serials (notably with
+    `--no-redact`), and default umask typically leaves them world-readable.
+    `fchmod` tightens an existing file too — `O_CREAT`'s mode is ignored when
+    the file already exists, so a plain open would inherit the old permissions.
+    (`fchmod` is POSIX-only; on Windows we fall back to the `O_CREAT` mode.)
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "w")
+    except Exception:  # noqa: BLE001 — don't leak the fd if fchmod/fdopen fails
+        os.close(fd)
+        raise
+
+
 def _serialise_cache(cache: RegisterCache) -> dict[str, int]:
     return {f"{reg._type}({reg._idx})": value for reg, value in cache.items()}
 
@@ -143,7 +163,8 @@ def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> 
             if cache
         },
     }
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    with _open_private(output) as f:
+        f.write(json.dumps(payload, indent=2, sort_keys=True))
     populated = {addr: c for addr, c in plant.register_caches.items() if c}
     total = sum(len(c) for c in populated.values())
     caps_note = (
