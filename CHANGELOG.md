@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.5.0] - 2026-06-10
+
+### 🔧 Maintenance
+
+- require givenergy-modbus 2.2.0 final (#66) ([9a79126](https://github.com/dewet22/givenergy-cli/commit/9a791260156fa58db618d9baa0c1178f931d7e83))
+
 ## [1.5.0rc1] - 2026-06-10
 
 ### 🐛 Fixed
