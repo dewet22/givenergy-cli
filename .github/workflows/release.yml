@@ -47,6 +47,9 @@ jobs:
           # For republish: check out the tagged commit so the build picks up
           # the exact pyproject.toml/uv.lock state that was originally released.
           ref: ${{ inputs.republish_tag || github.ref }}
+          # Full history + tags: release.py walks `git describe`..HEAD to build
+          # the changelog; a shallow clone collapses that to the tip commit.
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
