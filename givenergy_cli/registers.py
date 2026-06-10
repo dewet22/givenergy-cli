@@ -87,10 +87,16 @@ def _open_private(path: Path):
     `--no-redact`), and default umask typically leaves them world-readable.
     `fchmod` tightens an existing file too — `O_CREAT`'s mode is ignored when
     the file already exists, so a plain open would inherit the old permissions.
+    (`fchmod` is POSIX-only; on Windows we fall back to the `O_CREAT` mode.)
     """
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
-    return os.fdopen(fd, "w")
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "w")
+    except Exception:  # noqa: BLE001 — don't leak the fd if fchmod/fdopen fails
+        os.close(fd)
+        raise
 
 
 def _serialise_cache(cache: RegisterCache) -> dict[str, int]:

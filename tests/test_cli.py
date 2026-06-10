@@ -276,5 +276,7 @@ def test_export_writes_owner_only_permissions(monkeypatch, tmp_path):
 
     export_plant(host="127.0.0.1", port=8899, output=out, redact=True)
 
-    mode = stat.S_IMODE(os.stat(out).st_mode)
-    assert mode == 0o600, oct(mode)
+    # Windows doesn't map POSIX permission bits, so only assert on Unix.
+    if os.name != "nt":
+        mode = stat.S_IMODE(os.stat(out).st_mode)
+        assert mode == 0o600, oct(mode)
