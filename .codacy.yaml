@@ -4,3 +4,7 @@
 # `assert` statements would otherwise be flagged as bandit B101.
 exclude_paths:
   - 'tests/**'
+  # The security contact address in SECURITY.md is published deliberately
+  # (it's the point of the file, and already public in pyproject.toml);
+  # Codacy's PII check flags it otherwise.
+  - 'SECURITY.md'
