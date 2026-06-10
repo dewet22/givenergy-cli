@@ -46,7 +46,7 @@ Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status ba
 uv run givenergy-cli --host 192.168.x.x capture --output frames.log --duration 60
 ```
 
-Connects and records raw redacted Modbus frames for the given duration (default 60 s). Writes one line per frame: a UTC timestamp and the hex payload. The output file is safe to attach to a GitHub issue.
+Connects and records raw redacted Modbus frames for the given duration (default 60 s). Writes one line per frame: a UTC timestamp and the hex payload. Serials are redacted in every frame the library can decode; a frame it can't decode is passed through untouched, so it's worth a quick skim before attaching the file to a public issue.
 
 ### `probe` — read an arbitrary register range
 
@@ -117,6 +117,16 @@ givenergy_cli/
 tests/
     fixtures/      — anonymised plant JSON fixtures (good + bad-enum cases)
 ```
+
+## Security
+
+A few deliberate properties worth knowing:
+
+- **Read-only by design.** Every command only ever *reads* registers — the CLI never issues a Modbus write to the inverter.
+- **The local Modbus-TCP interface is unauthenticated and unencrypted.** That's a property of the GivEnergy hardware, not something this tool can change: anyone who can reach port 8899 can read from the inverter. Keeping the inverter on a segmented network (VLAN/firewall) is the control that matters, and it's yours to apply.
+- **Sharing is redaction-aware.** `export` redacts serial numbers by default (pass `--no-redact` for raw data); `capture` redacts on a best-effort, per-frame basis (see the note above).
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). A point-in-time audit of the codebase lives in [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
 
 ## Dependencies
 
