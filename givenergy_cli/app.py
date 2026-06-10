@@ -30,6 +30,7 @@ from givenergy_modbus.exceptions import CommunicationError
 from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
+from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
     History,
@@ -232,8 +233,10 @@ class Topology(Static):
     }
     """
 
-    # Below this threshold (kW) we treat a flow as "idle" — neutral arrow, dimmed text.
-    _IDLE_THRESHOLD: ClassVar[float] = 0.05
+    # Below this threshold (kW) we treat a flow as "idle" — neutral arrow, dimmed
+    # text. Shared with the Glance view's flow_status so the headline sentence
+    # and the diagram always classify flows identically.
+    _IDLE_THRESHOLD: ClassVar[float] = IDLE_THRESHOLD
     # Window driving the in-box sparklines (PV, load, EPS, SOC).
     _SPARKLINE_WINDOW_S: ClassVar[float] = 420.0  # ~7 min
 
@@ -952,9 +955,10 @@ class GivEnergyApp(App):
     CSS = """
     Screen { layout: vertical; }
     #tabs { height: 1fr; }
-    #live-layout { height: 1fr; }
-    #live-left { width: auto; height: 100%; }
-    #live-right { width: 1fr; height: 100%; }
+    #flow-layout { height: 1fr; }
+    #analyst-layout { height: 1fr; }
+    #analyst-left { width: auto; height: 100%; }
+    #analyst-right { width: 1fr; height: 100%; }
     #log-panel {
         display: none;
         height: 10;
@@ -976,8 +980,9 @@ class GivEnergyApp(App):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "quick_refresh", "Refresh"),
         Binding("shift+r", "full_refresh", "Full refresh"),
-        Binding("1", "show_live", "Live"),
-        Binding("2", "show_energy", "Energy"),
+        Binding("1", "show_glance", "Glance"),
+        Binding("2", "show_flow", "Flow"),
+        Binding("3", "show_analyst", "Analyst"),
         Binding("l", "toggle_log", "Logs"),
         # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
@@ -1011,20 +1016,20 @@ class GivEnergyApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent(initial="live-tab", id="tabs"):
-            with TabPane("Live", id="live-tab"):
-                with Horizontal(id="live-layout"):
-                    with Vertical(id="live-left"):
-                        yield Topology(id="topology")
+        with TabbedContent(initial="glance-tab", id="tabs"):
+            with TabPane("Glance", id="glance-tab"):
+                yield GlancePanel(id="glance")
+            with TabPane("Flow", id="flow-tab"):
+                with Vertical(id="flow-layout"):
+                    yield TileRow(id="flow-tiles")
+                    yield Topology(id="topology")
+            with TabPane("Analyst", id="analyst-tab"):
+                with Horizontal(id="analyst-layout"):
+                    with Vertical(id="analyst-left"):
                         yield EnergyBalance(id="energy-balance")
-                    with Vertical(id="live-right"):
+                    with Vertical(id="analyst-right"):
                         yield InverterPanel()
                         yield BatteryPanel()
-            with TabPane("Energy", id="energy-tab"):
-                yield Label(
-                    "Energy view — node graph + ledger (coming next phase)",
-                    id="energy-placeholder",
-                )
         yield RichLog(id="log-panel", highlight=True, markup=True)
         with Horizontal(id="status-bar"):
             yield Label("", id="last-refresh")
@@ -1096,6 +1101,8 @@ class GivEnergyApp(App):
 
     def _update_panels(self) -> None:
         plant = self.client.plant
+        self.query_one(GlancePanel).refresh_from(plant)
+        self.query_one(TileRow).refresh_from(plant)
         self.query_one(Topology).refresh_from(plant)
         self.query_one(EnergyBalance).refresh_from(plant)
         self.query_one(InverterPanel).refresh_from(plant)
@@ -1143,11 +1150,14 @@ class GivEnergyApp(App):
         log = self.query_one("#log-panel", RichLog)
         log.display = not log.display
 
-    def action_show_live(self) -> None:
-        self.query_one(TabbedContent).active = "live-tab"
+    def action_show_glance(self) -> None:
+        self.query_one(TabbedContent).active = "glance-tab"
 
-    def action_show_energy(self) -> None:
-        self.query_one(TabbedContent).active = "energy-tab"
+    def action_show_flow(self) -> None:
+        self.query_one(TabbedContent).active = "flow-tab"
+
+    def action_show_analyst(self) -> None:
+        self.query_one(TabbedContent).active = "analyst-tab"
 
     # async def action_calibrate(self) -> None:
     #     if self.client.connected:

@@ -31,10 +31,17 @@ After `uv sync` the `givenergy-cli` command is available at `.venv/bin/givenergy
 uv run givenergy-cli --host 192.168.x.x tui
 ```
 
-Live Inverter / Power Flow / Battery panels, a modbus log panel, and a status bar showing connection state and the time of the last refresh. The Inverter panel has collapsible Charge Slot and Discharge Slot sections. The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
+Three views, mirroring the layout of the companion Home Assistant dashboards, plus a modbus log panel and a status bar showing connection state and the time of the last refresh:
+
+- **Glance** (default) — headline summary: a flow-status sentence, Solar today / Battery SOC / Home now figures, and a chip row with per-battery SOC and today's import/export.
+- **Flow** — three "now" tiles above the animated power-flow topology.
+- **Analyst** — the data-heavy widgets: energy balance ledger, Inverter panel (with collapsible Charge/Discharge Slot sections), and Battery panel.
+
+The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
 
 | Key       | Action                                                       |
 |-----------|--------------------------------------------------------------|
+| `1` / `2` / `3` | Switch view: Glance / Flow / Analyst                    |
 | `r`       | Refresh now (re-reads instantaneous measurements)            |
 | `Shift+R` | Full refresh — also re-reads the holding-register config blocks |
 | `l`       | Toggle the modbus log panel                                  |

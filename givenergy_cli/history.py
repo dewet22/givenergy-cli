@@ -28,6 +28,16 @@ from givenergy_modbus.model.plant import Plant
 T = TypeVar("T")
 
 
+def _first_field(obj: object, *names: str) -> float | None:
+    """First non-None attribute among *names*, or None if all absent/None.
+    Bridges field renames across givenergy-modbus versions."""
+    for name in names:
+        value = getattr(obj, name, None)
+        if value is not None:
+            return value
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class PlantSnapshot:
     """One refresh's instantaneous plant state, normalised to display units."""
@@ -128,9 +138,19 @@ class EnergyCounters:
             e_pv2_day=inv.e_pv2_day,
             e_grid_in_day=inv.e_grid_in_day,
             e_grid_out_day=inv.e_grid_out_day,
-            e_load_day=inv.e_load_day,
-            e_battery_charge_day=inv.e_battery_charge_day,
-            e_battery_discharge_day=inv.e_battery_discharge_day,
+            # givenergy-modbus 2.2 reworked the register LUTs: e_load_day was
+            # dropped (no successor field) and the battery day counters were
+            # renamed to *_today_alt1 (same IR(36)/IR(37) registers as the old
+            # names). Fall back so the energy ring keeps working on both lines;
+            # absent fields become None, which every consumer already renders
+            # as "—".
+            e_load_day=_first_field(inv, "e_load_day"),
+            e_battery_charge_day=_first_field(
+                inv, "e_battery_charge_day", "e_battery_charge_today_alt1"
+            ),
+            e_battery_discharge_day=_first_field(
+                inv, "e_battery_discharge_day", "e_battery_discharge_today_alt1"
+            ),
         )
 
     @property
