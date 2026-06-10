@@ -28,12 +28,14 @@ from textual.widgets import (
 from givenergy_modbus.client.client import Client
 from givenergy_modbus.exceptions import (
     CommunicationError,
+    PlantTopologyMismatch,
     RefreshFailed,
     RefreshPartiallySucceeded,
 )
 from givenergy_modbus.model.inverter import SinglePhaseInverter
-from givenergy_modbus.model.plant import Plant
+from givenergy_modbus.model.plant import Plant, PlantCapabilities
 
+from givenergy_cli import capabilities_cache
 from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
@@ -1012,8 +1014,12 @@ class GivEnergyApp(App):
         port: int = 8899,
         refresh_interval: float = 15.0,
         log_level: str = "WARNING",
+        redetect: bool = False,
     ) -> None:
         super().__init__()
+        self._host = host
+        self._port = port
+        self._redetect = redetect
         self.client = Client(host=host, port=port)
         self.refresh_interval = refresh_interval
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
@@ -1065,27 +1071,78 @@ class GivEnergyApp(App):
         modbus_logger = logging.getLogger("givenergy_modbus")
         modbus_logger.setLevel(self.log_level)
         modbus_logger.addHandler(handler)
+        # Panels paint as soon as data lands — this tick only reads the plant
+        # (no I/O), so it's safe to run alongside the serialised startup below.
+        self.set_interval(1, self._update_panels)
         try:
             await self.client.connect()
-            self.query_one(ConnectionStatus).connected = "probing"
-            self.client.plant.capabilities = await self.client.detect()
-            await self.client.load_config()
-            await self.client.refresh()
-            self._last_refresh_at = datetime.now()
-            self._snapshot()
-        except RefreshPartiallySucceeded as exc:
-            # Flaky first refresh — keep the partial data that was committed.
-            modbus_logger.warning("Startup refresh incomplete: %s", exc)
-            self._last_refresh_partial = True
-            self._last_refresh_at = datetime.now()
-            self._snapshot()
+            cached = (
+                None
+                if self._redetect
+                else capabilities_cache.load(self._host, self._port)
+            )
+            if cached is not None:
+                # Warm start: trust the cached topology and paint immediately,
+                # then confirm it with a cheap hinted re-detect. A *removed*
+                # device makes this first refresh partial AND the prior stale, so
+                # _record_refresh tolerates the partial (rather than aborting the
+                # branch) and the confirm always runs.
+                self.client.plant.capabilities = cached
+                await self.client.load_config()
+                await self._record_refresh(modbus_logger)
+                await self._confirm_topology(cached, modbus_logger)
+            else:
+                # Cold start: full probe, then persist for next time.
+                self.query_one(ConnectionStatus).connected = "probing"
+                caps = await self.client.detect()
+                self.client.plant.capabilities = caps
+                capabilities_cache.save(self._host, self._port, caps)
+                await self.client.load_config()
+                await self._record_refresh(modbus_logger)
         except Exception as exc:  # noqa: BLE001
             modbus_logger.error(
                 "Startup failed: %r — will retry from periodic tick", exc
             )
         self.set_interval(self.refresh_interval, self._periodic_refresh)
         self.set_interval(1, self._tick_status_bar)
-        self.set_interval(1, self._update_panels)
+
+    async def _record_refresh(self, logger: logging.Logger) -> None:
+        """Refresh and snapshot, tolerating a partial result (kept + flagged so
+        the status bar can show '· partial'). A full RefreshFailed propagates to
+        the caller — there's nothing usable to paint."""
+        try:
+            await self.client.refresh()
+            self._last_refresh_partial = False
+        except RefreshPartiallySucceeded as exc:
+            logger.warning("refresh incomplete: %s", exc)
+            self._last_refresh_partial = True
+        self._last_refresh_at = datetime.now()
+        self._snapshot()
+
+    async def _confirm_topology(
+        self, prior: PlantCapabilities, logger: logging.Logger
+    ) -> None:
+        """Hinted re-detect against the cached prior. Adopt + re-persist a changed
+        layout (and refresh against it); otherwise keep the prior. A probe failure
+        keeps the prior — periodic refresh carries on.
+
+        A hinted detect only re-confirms the addresses already in the prior, so it
+        catches a *removed* or changed device but **not** a newly-added one — use
+        ``--redetect`` after adding hardware."""
+        try:
+            await self.client.detect(prior=prior)
+        except PlantTopologyMismatch as exc:
+            logger.warning(
+                "plant topology changed since last run — adopting new layout"
+            )
+            # detect() nulls plant.capabilities on mismatch; accept the new one
+            # and repaint against it so the UI isn't left on the stale topology.
+            self.client.plant.capabilities = exc.actual
+            capabilities_cache.save(self._host, self._port, exc.actual)
+            await self.client.load_config()
+            await self._record_refresh(logger)
+        except (CommunicationError, TimeoutError) as exc:
+            logger.debug("topology re-check skipped: %r", exc)
 
     @work
     async def _periodic_refresh(self) -> None:

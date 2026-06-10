@@ -39,6 +39,8 @@ Three views, mirroring the layout of the companion Home Assistant dashboards, pl
 
 The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
 
+The plant topology is detected once and cached per host, so subsequent launches skip the slow probe and paint near-immediately (a cheap re-check runs in the background to catch hardware changes). Pass `--redetect` to force a full detection and refresh the cache after changing hardware.
+
 | Key       | Action                                                       |
 |-----------|--------------------------------------------------------------|
 | `1` / `2` / `3` | Switch view: Glance / Flow / Analyst                    |

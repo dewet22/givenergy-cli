@@ -57,6 +57,12 @@ def tui(
     ctx: typer.Context,
     refresh_interval: float = typer.Option(15.0, envvar="GIVENERGY_REFRESH_INTERVAL"),
     log_level: LogLevel = typer.Option(LogLevel.INFO, envvar="GIVENERGY_LOG_LEVEL"),
+    redetect: bool = typer.Option(
+        False,
+        "--redetect",
+        help="Ignore the cached plant topology and run a full detect on startup "
+        "(also refreshes the cache). Use after changing hardware.",
+    ),
 ) -> None:
     """Launch the interactive TUI."""
     GivEnergyApp(
@@ -64,6 +70,7 @@ def tui(
         port=ctx.obj["port"],
         refresh_interval=refresh_interval,
         log_level=log_level.value,
+        redetect=redetect,
     ).run()
 
 
