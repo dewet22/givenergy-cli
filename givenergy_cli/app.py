@@ -1014,10 +1014,12 @@ class GivEnergyApp(App):
         port: int = 8899,
         refresh_interval: float = 15.0,
         log_level: str = "WARNING",
+        redetect: bool = False,
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
+        self._redetect = redetect
         self.client = Client(host=host, port=port)
         self.refresh_interval = refresh_interval
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
@@ -1074,7 +1076,11 @@ class GivEnergyApp(App):
         self.set_interval(1, self._update_panels)
         try:
             await self.client.connect()
-            cached = capabilities_cache.load(self._host, self._port)
+            cached = (
+                None
+                if self._redetect
+                else capabilities_cache.load(self._host, self._port)
+            )
             if cached is not None:
                 # Warm start: trust the cached topology, paint immediately, and
                 # confirm it in the background via a cheap hinted re-detect.

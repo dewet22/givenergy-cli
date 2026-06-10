@@ -52,12 +52,14 @@ class RecordingClient:
         pass
 
 
-def _run(monkeypatch, tmp_path):
+def _run(monkeypatch, tmp_path, *, redetect=False):
     monkeypatch.setattr(cc.platformdirs, "user_cache_dir", lambda _n: str(tmp_path))
     monkeypatch.setattr(app_mod, "Client", RecordingClient)
 
     async def drive():
-        app = app_mod.GivEnergyApp(host="10.0.0.9", refresh_interval=3600)
+        app = app_mod.GivEnergyApp(
+            host="10.0.0.9", refresh_interval=3600, redetect=redetect
+        )
         async with app.run_test() as pilot:
             await pilot.pause(0.2)
             return app.client
@@ -73,6 +75,15 @@ def test_cold_start_detects_and_persists(monkeypatch, tmp_path):
     assert client.refresh_calls >= 1
     # Capabilities are now persisted for next launch.
     assert cc.load("10.0.0.9", 8899) is not None
+
+
+def test_redetect_forces_cold_despite_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(cc.platformdirs, "user_cache_dir", lambda _n: str(tmp_path))
+    cc.save("10.0.0.9", 8899, _caps())  # cache present…
+
+    client = _run(monkeypatch, tmp_path, redetect=True)
+    # …but --redetect ignores it and runs a full cold detect.
+    assert client.detect_calls == [None]
 
 
 def test_warm_start_skips_cold_detect(monkeypatch, tmp_path):
