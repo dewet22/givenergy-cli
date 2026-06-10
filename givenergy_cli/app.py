@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from rich.markup import escape
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -36,6 +36,7 @@ from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 
 from givenergy_cli import capabilities_cache
+from givenergy_cli.controls import ConfirmModal, ControlsPanel
 from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
@@ -998,8 +999,8 @@ class GivEnergyApp(App):
         Binding("1", "show_glance", "Glance"),
         Binding("2", "show_flow", "Flow"),
         Binding("3", "show_analyst", "Analyst"),
+        Binding("4", "show_controls", "Controls"),
         Binding("l", "toggle_log", "Logs"),
-        # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -1015,11 +1016,13 @@ class GivEnergyApp(App):
         refresh_interval: float = 15.0,
         log_level: str = "WARNING",
         redetect: bool = False,
+        allow_writes: bool = False,
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
         self._redetect = redetect
+        self._allow_writes = allow_writes
         self.client = Client(host=host, port=port)
         self.refresh_interval = refresh_interval
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
@@ -1058,6 +1061,8 @@ class GivEnergyApp(App):
                     with Vertical(id="analyst-right"):
                         yield InverterPanel()
                         yield BatteryPanel()
+            with TabPane("Controls", id="controls-tab"):
+                yield ControlsPanel(allow_writes=self._allow_writes, id="controls")
         yield RichLog(id="log-panel", highlight=True, markup=True)
         with Horizontal(id="status-bar"):
             yield Label("", id="last-refresh")
@@ -1217,6 +1222,7 @@ class GivEnergyApp(App):
         self.query_one(EnergyBalance).refresh_from(plant)
         self.query_one(InverterPanel).refresh_from(plant)
         self.query_one(BatteryPanel).refresh_from(plant)
+        self.query_one(ControlsPanel).refresh_from(plant)
 
     def _tick_status_bar(self) -> None:
         status = self.query_one(ConnectionStatus)
@@ -1273,7 +1279,37 @@ class GivEnergyApp(App):
     def action_show_analyst(self) -> None:
         self.query_one(TabbedContent).active = "analyst-tab"
 
-    # async def action_calibrate(self) -> None:
-    #     if self.client.connected:
-    #         await self.client.one_shot_command(commands.set_calibrate_battery_soc())
-    #         self.notify("Battery SOC calibration initiated.")
+    def action_show_controls(self) -> None:
+        self.query_one(TabbedContent).active = "controls-tab"
+
+    # --- write command execution (Controls view) -----------------------------
+
+    @on(ControlsPanel.Apply)
+    def _on_control_apply(self, message: ControlsPanel.Apply) -> None:
+        if self._allow_writes:
+            self._send_command(message.requests, message.label)
+
+    @on(ControlsPanel.Dangerous)
+    async def _on_control_dangerous(self, message: ControlsPanel.Dangerous) -> None:
+        if not self._allow_writes:
+            return
+        confirmed = await self.push_screen_wait(
+            ConfirmModal(message.prompt, message.token)
+        )
+        if confirmed:
+            self._send_command(message.requests, message.label)
+
+    @work
+    async def _send_command(self, requests, label: str) -> None:
+        """Execute a write command list and report the outcome to the log panel."""
+        logger = logging.getLogger("givenergy_modbus")
+        try:
+            await self.client.one_shot_command(requests)
+        except Exception as exc:  # noqa: BLE001 — surface any write failure, don't crash
+            logger.warning("write failed (%s): %r", label, exc)
+            self.notify(f"Write failed: {label}", severity="error", timeout=5)
+        else:
+            logger.info("applied: %s", label)
+            # Re-read so the panels reflect the new state promptly.
+            self._next_refresh_full = True
+            self._periodic_refresh()

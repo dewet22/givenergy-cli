@@ -91,12 +91,19 @@ def test_tui_tabs_smoke(monkeypatch):
         async with app.run_test() as pilot:
             tabs = app.query_one(TabbedContent)
             pane_ids = {pane.id for pane in app.query(TabPane)}
-            assert pane_ids == {"glance-tab", "flow-tab", "analyst-tab"}
+            assert pane_ids == {
+                "glance-tab",
+                "flow-tab",
+                "analyst-tab",
+                "controls-tab",
+            }
             assert tabs.active == "glance-tab"
             await pilot.press("2")
             assert tabs.active == "flow-tab"
             await pilot.press("3")
             assert tabs.active == "analyst-tab"
+            await pilot.press("4")
+            assert tabs.active == "controls-tab"
             await pilot.press("1")
             assert tabs.active == "glance-tab"
 
