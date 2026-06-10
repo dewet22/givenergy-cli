@@ -196,6 +196,15 @@ class ConfirmModal(ModalScreen[bool]):
 # --- the controls panel -------------------------------------------------------
 
 
+class _CommitInput(Input):
+    """An Input that commits on blur as well as on Enter, HA-style: tabbing or
+    clicking away applies the typed value rather than letting the next read-back
+    revert it. The panel dedups unchanged values, so a no-op blur sends nothing."""
+
+    def on_blur(self) -> None:
+        self.post_message(self.Submitted(self, self.value))
+
+
 class ControlsPanel(VerticalScroll):
     """Grouped write controls. Reads current state back from the plant; emits
     dispatched command lists for the app to execute. Inert (no command ever
@@ -220,6 +229,9 @@ class ControlsPanel(VerticalScroll):
     }
     ControlsPanel.-readonly Input, ControlsPanel.-readonly Switch,
     ControlsPanel.-readonly Button { opacity: 40%; }
+    /* Write in flight — tint without disabling, so focus isn't stolen. */
+    ControlsPanel .-pending { background: $warning 25%; }
+    ControlsPanel Input.-invalid { border: tall $error; }
     """
 
     class Apply(Message):
@@ -258,11 +270,11 @@ class ControlsPanel(VerticalScroll):
         # the handler consumes one echo per id here, suppressing a spurious
         # write-back of the value we just read.
         self._programmatic: set[str] = set()
+        # Last known real value per input, for change detection — a commit
+        # (Enter or blur) whose value matches this sends no write.
+        self._last_value: dict[str, str] = {}
         # Number of slot editors rendered; fixed at first sight of capabilities.
         self._slots = 0
-        # Set while we push read-back values into widgets, so our own updates
-        # don't echo back as user-initiated writes.
-        self._syncing = False
         self._built = False
 
     def compose(self) -> ComposeResult:
@@ -282,8 +294,11 @@ class ControlsPanel(VerticalScroll):
     def _switch(self, wid: str) -> Switch:
         return Switch(id=wid, disabled=self._readonly)
 
-    def _time_input(self, wid: str) -> Input:
-        return Input(id=wid, placeholder="HH:MM", disabled=self._readonly)
+    def _num_input(self, wid: str) -> _CommitInput:
+        return _CommitInput(id=wid, disabled=self._readonly)
+
+    def _time_input(self, wid: str) -> _CommitInput:
+        return _CommitInput(id=wid, placeholder="HH:MM", disabled=self._readonly)
 
     def _build(self, caps: PlantCapabilities) -> None:
         """Construct the control rows for the detected topology (once). Widgets
@@ -296,8 +311,8 @@ class ControlsPanel(VerticalScroll):
 
         body.mount(Label("Charging", classes="group-title"))
         body.mount(self._row("Enable charge", self._switch("enable-charge")))
-        body.mount(self._row("Charge target %", Input(id="charge-target", disabled=d)))
-        body.mount(self._row("SOC reserve %", Input(id="soc-reserve", disabled=d)))
+        body.mount(self._row("Charge target %", self._num_input("charge-target")))
+        body.mount(self._row("SOC reserve %", self._num_input("soc-reserve")))
         for i in range(1, self._slots + 1):
             body.mount(
                 self._row(f"Charge slot {i} start", self._time_input(f"cs{i}-start"))
@@ -361,6 +376,7 @@ class ControlsPanel(VerticalScroll):
     def _sync_input(self, wid: str, value: str) -> None:
         if wid in self._pending:
             return
+        self._last_value[wid] = value  # the real value, for commit change-detection
         inp = self._maybe(Input, wid)
         # Don't clobber a field the user is mid-edit in.
         if inp is not None and not inp.has_focus and inp.value != value:
@@ -369,22 +385,21 @@ class ControlsPanel(VerticalScroll):
     # -- write-in-flight freeze ------------------------------------------------
 
     def freeze(self, control_id: str) -> None:
-        """Disable a control and pin its value while its write is on the wire,
-        so the 1 s read-back doesn't flip it back to the pre-write state."""
+        """Pin a control's value while its write is on the wire so the 1 s
+        read-back doesn't flip it back. Marked visually (a tint) rather than
+        disabled — disabling would steal focus from the control just used."""
         self._pending.add(control_id)
         w = self._maybe(None, control_id)
         if w is not None:
-            w.disabled = True
+            w.add_class("-pending")
 
     def unfreeze(self, control_id: str) -> None:
         """Release a control once its write has resolved; the next refresh syncs
         it to the inverter's real state (which, on success, is what was set)."""
         self._pending.discard(control_id)
-        if self._readonly:
-            return
         w = self._maybe(None, control_id)
         if w is not None:
-            w.disabled = False
+            w.remove_class("-pending")
 
     def _sync_slot(self, prefix: str, idx: int, slot) -> None:
         start = slot.start if slot is not None else None
@@ -418,11 +433,16 @@ class ControlsPanel(VerticalScroll):
 
     @on(Input.Submitted)
     def _on_input(self, event: Input.Submitted) -> None:
+        # Fires on Enter and (via _CommitInput) on blur. Skip an unchanged value
+        # so tabbing through fields, or blur-after-Enter, doesn't re-write.
         if not self._allow_writes or self._caps is None:
             return
         wid = event.input.id or ""
+        if event.value == self._last_value.get(wid):
+            return
         try:
             self._dispatch_input(wid, event.value)
+            self._last_value[wid] = event.value
             event.input.remove_class("-invalid")
         except (ValueError, UnsupportedControl) as exc:
             event.input.add_class("-invalid")

@@ -199,14 +199,81 @@ def test_frozen_control_holds_optimistic_value(monkeypatch):
             panel.refresh_from(app.client.plant)
             await pilot.pause(0.1)
             assert switch.value is False
-            assert switch.disabled  # frozen
+            assert switch.has_class("-pending")  # frozen, but not disabled
+            assert not switch.disabled  # so focus isn't stolen
 
             # Once the write resolves, unfreeze and re-sync to real state.
             panel.unfreeze("enable-charge")
             panel.refresh_from(app.client.plant)
             await pilot.pause(0.1)
             assert switch.value is True
-            assert not switch.disabled
+            assert not switch.has_class("-pending")
+
+    asyncio.run(go())
+
+
+def test_commit_on_blur_and_dedup(monkeypatch):
+    """A changed input value commits when it loses focus (HA-style); an
+    unchanged value (e.g. tabbing through, or blur after Enter) sends nothing."""
+    from givenergy_cli.controls import _CommitInput
+
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.2)
+            panel.refresh_from(app.client.plant)  # _last_value now = fixture
+            await pilot.pause(0.1)
+
+            inp = app.query_one("#charge-target", _CommitInput)
+            # Blur with the unchanged value → no write.
+            inp.focus()
+            await pilot.pause(0.05)
+            app.query_one("#soc-reserve").focus()  # blur charge-target
+            await pilot.pause(0.1)
+            assert app.client.commands == [], "unchanged blur must not write"
+
+            # Change the value and blur → commits.
+            inp.value = "55"
+            inp.focus()
+            await pilot.pause(0.05)
+            app.query_one("#soc-reserve").focus()
+            await pilot.pause(0.2)
+            assert app.client.commands, "changed blur should write"
+
+    asyncio.run(go())
+
+
+def test_ctrl_pagedown_cycles_tabs(monkeypatch):
+    """The modifier cycle switches views even with a text input focused."""
+    from textual.widgets import TabbedContent
+
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.2)
+            tabs = app.query_one(TabbedContent)
+            await pilot.press("4")
+            assert tabs.active == "controls-tab"
+            app.query_one("#charge-target").focus()  # an input now has focus
+            await pilot.pause(0.05)
+            await pilot.press("ctrl+pagedown")  # wraps to glance
+            assert tabs.active == "glance-tab"
+            await pilot.press("ctrl+pageup")  # back to controls
+            assert tabs.active == "controls-tab"
 
     asyncio.run(go())
 

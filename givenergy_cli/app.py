@@ -1000,8 +1000,20 @@ class GivEnergyApp(App):
         Binding("2", "show_flow", "Flow"),
         Binding("3", "show_analyst", "Analyst"),
         Binding("4", "show_controls", "Controls"),
+        # Modifier cycle works even while a text input has focus (the digit
+        # shortcuts get typed into the field instead of switching tabs).
+        # Input binds ctrl+left/right for word nav, so use pageup/down.
+        Binding("ctrl+pagedown", "next_tab", "Next view"),
+        Binding("ctrl+pageup", "prev_tab", "Prev view", show=False),
         Binding("l", "toggle_log", "Logs"),
         Binding("q", "quit", "Quit"),
+    ]
+
+    _TAB_IDS: ClassVar[list[str]] = [
+        "glance-tab",
+        "flow-tab",
+        "analyst-tab",
+        "controls-tab",
     ]
 
     SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -1281,6 +1293,20 @@ class GivEnergyApp(App):
 
     def action_show_controls(self) -> None:
         self.query_one(TabbedContent).active = "controls-tab"
+
+    def _cycle_tab(self, step: int) -> None:
+        tabs = self.query_one(TabbedContent)
+        try:
+            i = self._TAB_IDS.index(tabs.active)
+        except ValueError:
+            i = 0
+        tabs.active = self._TAB_IDS[(i + step) % len(self._TAB_IDS)]
+
+    def action_next_tab(self) -> None:
+        self._cycle_tab(1)
+
+    def action_prev_tab(self) -> None:
+        self._cycle_tab(-1)
 
     # --- write command execution (Controls view) -----------------------------
 
