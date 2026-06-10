@@ -44,9 +44,16 @@ The old "Energy" tab was a placeholder and is removed.
   share it (no visual change to the diagram).
 
 Data comes entirely from existing fields: `p_pv1/p_pv2`, `p_grid_out`
-(signed, +export), `p_battery` (signed), `p_load_demand`, `battery_soc`,
-`e_pv1_day+e_pv2_day`, `e_grid_in/out_day`, `e_load_day`,
-`plant.batteries[i].serial_number/.soc`. No modbus changes.
+(signed, +export), `p_battery` (signed), `p_load_demand` (busbar-sensed,
+includes the EPS branch — shown as "of which", not summed), `battery_soc`,
+`e_pv1_day+e_pv2_day`, `e_grid_in/out_day`, `e_consumption_today`
+(single-phase, derived) / `e_load_today` (three-phase, metered) for house
+consumption today, `plant.batteries[i].serial_number/.soc`. No modbus
+changes.
+
+Note: the old `e_load_day` (IR(35)) was a register mislabel — it actually
+backs AC-charge and was renamed `e_ac_charge_today` in modbus #174;
+`e_consumption_today` is the GE-app-faithful successor.
 
 ## Testing
 
