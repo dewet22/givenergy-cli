@@ -139,3 +139,59 @@ def test_warm_start_adopts_changed_topology(monkeypatch, tmp_path):
     # The new topology is adopted on the live client and re-persisted.
     assert app.client.plant.capabilities == actual
     assert cc.load("10.0.0.9", 8899) == actual
+
+
+def test_partial_refresh_still_confirms_topology(monkeypatch, tmp_path):
+    """A removed device makes the warm refresh partial — the path that most
+    needs the topology re-check. The confirm must still run (regression: the
+    partial used to abort the warm branch before _confirm_topology)."""
+    from givenergy_modbus.exceptions import (
+        PlantTopologyMismatch,
+        RefreshPartiallySucceeded,
+    )
+
+    monkeypatch.setattr(cc.platformdirs, "user_cache_dir", lambda _n: str(tmp_path))
+    cc.save("10.0.0.9", 8899, _caps())  # prior lists a battery that's now gone
+
+    actual = PlantCapabilities.from_dict(
+        {
+            "schema_version": 1,
+            "device_type": "HYBRID",
+            "inverter_address": "0x32",
+            "meter_addresses": ["0x01"],
+            "lv_battery_addresses": [],  # the battery was removed
+            "bcu_stacks": [],
+            "aio_battery_module_addresses": [],
+        }
+    )
+
+    class PartialThenMismatchClient(RecordingClient):
+        async def refresh(self, **kw):
+            self.refresh_calls += 1
+            if self.refresh_calls == 1:  # first (warm) refresh sees the gone device
+                raise RefreshPartiallySucceeded(
+                    "1 of 2 reads failed",
+                    plant=self.plant,
+                    failures=[],
+                    cause=ExceptionGroup("r", [TimeoutError()]),
+                )
+
+        async def detect(self, *, prior=None, **kw):
+            self.detect_calls.append(prior)
+            self.plant.capabilities = None
+            raise PlantTopologyMismatch("changed", prior=prior, actual=actual)
+
+    monkeypatch.setattr(app_mod, "Client", PartialThenMismatchClient)
+
+    async def drive():
+        app = app_mod.GivEnergyApp(host="10.0.0.9", refresh_interval=3600)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.2)
+            return app
+
+    app = asyncio.run(drive())
+    # Despite the partial first refresh, the confirm ran, adopted the change,
+    # re-persisted, and repainted (a second refresh against the new topology).
+    assert app.client.plant.capabilities == actual
+    assert cc.load("10.0.0.9", 8899) == actual
+    assert app.client.refresh_calls == 2

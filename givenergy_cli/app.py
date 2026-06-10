@@ -1082,13 +1082,14 @@ class GivEnergyApp(App):
                 else capabilities_cache.load(self._host, self._port)
             )
             if cached is not None:
-                # Warm start: trust the cached topology, paint immediately, and
-                # confirm it in the background via a cheap hinted re-detect.
+                # Warm start: trust the cached topology and paint immediately,
+                # then confirm it with a cheap hinted re-detect. A *removed*
+                # device makes this first refresh partial AND the prior stale, so
+                # _record_refresh tolerates the partial (rather than aborting the
+                # branch) and the confirm always runs.
                 self.client.plant.capabilities = cached
                 await self.client.load_config()
-                await self.client.refresh()
-                self._last_refresh_at = datetime.now()
-                self._snapshot()
+                await self._record_refresh(modbus_logger)
                 await self._confirm_topology(cached, modbus_logger)
             else:
                 # Cold start: full probe, then persist for next time.
@@ -1097,15 +1098,7 @@ class GivEnergyApp(App):
                 self.client.plant.capabilities = caps
                 capabilities_cache.save(self._host, self._port, caps)
                 await self.client.load_config()
-                await self.client.refresh()
-                self._last_refresh_at = datetime.now()
-                self._snapshot()
-        except RefreshPartiallySucceeded as exc:
-            # Flaky first refresh — keep the partial data that was committed.
-            modbus_logger.warning("Startup refresh incomplete: %s", exc)
-            self._last_refresh_partial = True
-            self._last_refresh_at = datetime.now()
-            self._snapshot()
+                await self._record_refresh(modbus_logger)
         except Exception as exc:  # noqa: BLE001
             modbus_logger.error(
                 "Startup failed: %r — will retry from periodic tick", exc
@@ -1113,22 +1106,41 @@ class GivEnergyApp(App):
         self.set_interval(self.refresh_interval, self._periodic_refresh)
         self.set_interval(1, self._tick_status_bar)
 
+    async def _record_refresh(self, logger: logging.Logger) -> None:
+        """Refresh and snapshot, tolerating a partial result (kept + flagged so
+        the status bar can show '· partial'). A full RefreshFailed propagates to
+        the caller — there's nothing usable to paint."""
+        try:
+            await self.client.refresh()
+            self._last_refresh_partial = False
+        except RefreshPartiallySucceeded as exc:
+            logger.warning("refresh incomplete: %s", exc)
+            self._last_refresh_partial = True
+        self._last_refresh_at = datetime.now()
+        self._snapshot()
+
     async def _confirm_topology(
         self, prior: PlantCapabilities, logger: logging.Logger
     ) -> None:
-        """Hinted re-detect against the cached prior. Adopt and re-persist a
-        changed topology; otherwise keep the prior. A probe failure leaves the
-        prior in place — the periodic refresh keeps working off it."""
+        """Hinted re-detect against the cached prior. Adopt + re-persist a changed
+        layout (and refresh against it); otherwise keep the prior. A probe failure
+        keeps the prior — periodic refresh carries on.
+
+        A hinted detect only re-confirms the addresses already in the prior, so it
+        catches a *removed* or changed device but **not** a newly-added one — use
+        ``--redetect`` after adding hardware."""
         try:
             await self.client.detect(prior=prior)
         except PlantTopologyMismatch as exc:
             logger.warning(
                 "plant topology changed since last run — adopting new layout"
             )
-            # detect() nulls plant.capabilities on mismatch; accept the new one.
+            # detect() nulls plant.capabilities on mismatch; accept the new one
+            # and repaint against it so the UI isn't left on the stale topology.
             self.client.plant.capabilities = exc.actual
             capabilities_cache.save(self._host, self._port, exc.actual)
             await self.client.load_config()
+            await self._record_refresh(logger)
         except (CommunicationError, TimeoutError) as exc:
             logger.debug("topology re-check skipped: %r", exc)
 

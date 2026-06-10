@@ -31,7 +31,7 @@ def load(host: str, port: int) -> PlantCapabilities | None:
     usable prior (missing, unreadable, corrupt, or schema-mismatched)."""
     path = _path(host, port)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return PlantCapabilities.from_dict(data)
     except FileNotFoundError:
         return None
@@ -49,7 +49,7 @@ def save(host: str, port: int, caps: PlantCapabilities) -> None:
         # Atomic replace so a crash mid-write can't leave a truncated file that
         # would then be ignored as corrupt on the next load.
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(caps.to_dict(), indent=2))
+        tmp.write_text(json.dumps(caps.to_dict(), indent=2), encoding="utf-8")
         os.replace(tmp, path)
     except Exception as exc:  # noqa: BLE001 — caching must never break the app
         _logger.debug("could not write capabilities cache to %s: %r", path, exc)
