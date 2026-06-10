@@ -43,6 +43,14 @@ def test_flow_status_charging_no_solar():
     assert colour == "cyan"
 
 
+def test_flow_status_solar_covering_house():
+    # Grid and battery quiet, PV flowing: solar feeds the house directly —
+    # must not classify as idle (regression: 0.75 kW solar→home showed Idle).
+    sentence, colour = flow_status(pv=0.75, grid=0.0, battery=0.0)
+    assert sentence == "Solar covering the house."
+    assert colour == "yellow"
+
+
 def test_flow_status_idle_and_threshold_edges():
     sentence, colour = flow_status(pv=0.0, grid=0.0, battery=0.0)
     assert colour == "dim"

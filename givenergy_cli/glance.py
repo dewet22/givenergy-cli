@@ -43,6 +43,10 @@ def flow_status(
         if pv > idle:
             return "Charging battery from solar.", "cyan"
         return "Charging battery.", "cyan"
+    if pv > idle:
+        # Grid and battery both quiet but PV flowing: solar is feeding the
+        # house directly — common around the midday balance point.
+        return "Solar covering the house.", "yellow"
     return "Idle — no significant power flow.", "dim"
 
 
