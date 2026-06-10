@@ -1286,8 +1286,12 @@ class GivEnergyApp(App):
 
     @on(ControlsPanel.Apply)
     def _on_control_apply(self, message: ControlsPanel.Apply) -> None:
-        if self._allow_writes:
-            self._send_command(message.requests, message.label)
+        if not self._allow_writes:
+            return
+        # Freeze the control until the write resolves, so the 1 s read-back
+        # doesn't briefly flip it back to the pre-write value.
+        self.query_one(ControlsPanel).freeze(message.control_id)
+        self._send_command(message.requests, message.label, message.control_id)
 
     @on(ControlsPanel.Dangerous)
     async def _on_control_dangerous(self, message: ControlsPanel.Dangerous) -> None:
@@ -1297,11 +1301,13 @@ class GivEnergyApp(App):
             ConfirmModal(message.prompt, message.token)
         )
         if confirmed:
-            self._send_command(message.requests, message.label)
+            # Maintenance buttons aren't stateful controls — nothing to freeze.
+            self._send_command(message.requests, message.label, None)
 
     @work
-    async def _send_command(self, requests, label: str) -> None:
-        """Execute a write command list and report the outcome to the log panel."""
+    async def _send_command(self, requests, label: str, control_id: str | None) -> None:
+        """Execute a write command list and report the outcome to the log panel.
+        Always unfreezes the originating control when the write resolves."""
         logger = logging.getLogger("givenergy_modbus")
         try:
             await self.client.one_shot_command(requests)
@@ -1313,3 +1319,6 @@ class GivEnergyApp(App):
             # Re-read so the panels reflect the new state promptly.
             self._next_refresh_full = True
             self._periodic_refresh()
+        finally:
+            if control_id is not None:
+                self.query_one(ControlsPanel).unfreeze(control_id)

@@ -159,10 +159,77 @@ def test_readonly_blocks_writes(monkeypatch):
             await pilot.pause(0.2)
             # Even if an Apply message is posted, the app must not send when
             # writes are disabled.
-            panel.post_message(controls.ControlsPanel.Apply([object()], "x"))
+            panel.post_message(
+                controls.ControlsPanel.Apply([object()], "x", "enable-charge")
+            )
             await pilot.pause(0.2)
             assert app.client.commands == []
             # Controls render disabled in read-only mode.
             assert app.query_one("#enable-charge", Switch).disabled
+
+    asyncio.run(go())
+
+
+def test_frozen_control_holds_optimistic_value(monkeypatch):
+    """A control with a write in flight isn't flipped back by the read-back
+    sync; once unfrozen it re-syncs to the real state."""
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.2)
+            panel.refresh_from(app.client.plant)  # sync to fixture (enable_charge True)
+            await pilot.pause(0.1)
+            switch = app.query_one("#enable-charge", Switch)
+            assert switch.value is True
+
+            # Optimistic value without going through the (async) write path:
+            # mark the echo so it isn't treated as a user toggle, then flip.
+            panel._programmatic.add("enable-charge")
+            switch.value = False
+            await pilot.pause(0.05)
+            panel.freeze("enable-charge")
+            # A read-back must NOT flip it back to the inverter's True.
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.1)
+            assert switch.value is False
+            assert switch.disabled  # frozen
+
+            # Once the write resolves, unfreeze and re-sync to real state.
+            panel.unfreeze("enable-charge")
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.1)
+            assert switch.value is True
+            assert not switch.disabled
+
+    asyncio.run(go())
+
+
+def test_readback_does_not_emit_write(monkeypatch):
+    """Syncing a switch from the plant (e.g. external state change) must not be
+    mistaken for a user toggle and emit a spurious write-back."""
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)  # builds (switch defaults False)
+            await pilot.pause(0.2)
+            panel.refresh_from(app.client.plant)  # syncs False -> True (fixture)
+            await pilot.pause(0.2)
+            # The sync changed the switch value, but it must not be mistaken for
+            # a user toggle and emit a write.
+            assert app.query_one("#enable-charge", Switch).value is True
+            assert app.client.commands == [], "read-back must not emit a write"
 
     asyncio.run(go())

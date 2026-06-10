@@ -223,12 +223,14 @@ class ControlsPanel(VerticalScroll):
     """
 
     class Apply(Message):
-        """An everyday control changed — apply *requests* immediately."""
+        """An everyday control changed — apply *requests* immediately. The
+        emitting control is frozen until the write resolves (see freeze/unfreeze)."""
 
-        def __init__(self, requests: Requests, label: str) -> None:
+        def __init__(self, requests: Requests, label: str, control_id: str) -> None:
             super().__init__()
             self.requests = requests
             self.label = label
+            self.control_id = control_id
 
     class Dangerous(Message):
         """A disruptive control was pressed — confirm, then apply."""
@@ -247,6 +249,15 @@ class ControlsPanel(VerticalScroll):
         self._allow_writes = allow_writes
         self._readonly = not allow_writes
         self._caps: PlantCapabilities | None = None
+        # Controls with a write in flight: disabled, and skipped by refresh_from
+        # so the optimistic value holds until the write resolves (no flip-back).
+        self._pending: set[str] = set()
+        # Switches we just set programmatically during a read-back sync. The
+        # resulting Switch.Changed arrives asynchronously (after the sync call
+        # returns), so a flag can't distinguish it from a user toggle — instead
+        # the handler consumes one echo per id here, suppressing a spurious
+        # write-back of the value we just read.
+        self._programmatic: set[str] = set()
         # Number of slot editors rendered; fixed at first sight of capabilities.
         self._slots = 0
         # Set while we push read-back values into widgets, so our own updates
@@ -330,28 +341,50 @@ class ControlsPanel(VerticalScroll):
         if not self._built:
             self._build(caps)
 
-        self._syncing = True
-        try:
-            self._sync_switch("enable-charge", inv.enable_charge)
-            self._sync_switch("enable-discharge", inv.enable_discharge)
-            self._sync_input("charge-target", _str_or_blank(inv.charge_target_soc))
-            self._sync_input("soc-reserve", _str_or_blank(inv.battery_soc_reserve))
-            for i in range(1, self._slots + 1):
-                self._sync_slot("cs", i, getattr(inv, f"charge_slot_{i}", None))
-                self._sync_slot("ds", i, getattr(inv, f"discharge_slot_{i}", None))
-        finally:
-            self._syncing = False
+        self._sync_switch("enable-charge", inv.enable_charge)
+        self._sync_switch("enable-discharge", inv.enable_discharge)
+        self._sync_input("charge-target", _str_or_blank(inv.charge_target_soc))
+        self._sync_input("soc-reserve", _str_or_blank(inv.battery_soc_reserve))
+        for i in range(1, self._slots + 1):
+            self._sync_slot("cs", i, getattr(inv, f"charge_slot_{i}", None))
+            self._sync_slot("ds", i, getattr(inv, f"discharge_slot_{i}", None))
 
     def _sync_switch(self, wid: str, value) -> None:
+        if wid in self._pending:  # write in flight — hold the optimistic value
+            return
         sw = self._maybe(Switch, wid)
         if sw is not None and value is not None and sw.value != bool(value):
+            # Mark the echo so _on_switch doesn't treat our own set as a toggle.
+            self._programmatic.add(wid)
             sw.value = bool(value)
 
     def _sync_input(self, wid: str, value: str) -> None:
+        if wid in self._pending:
+            return
         inp = self._maybe(Input, wid)
         # Don't clobber a field the user is mid-edit in.
         if inp is not None and not inp.has_focus and inp.value != value:
             inp.value = value
+
+    # -- write-in-flight freeze ------------------------------------------------
+
+    def freeze(self, control_id: str) -> None:
+        """Disable a control and pin its value while its write is on the wire,
+        so the 1 s read-back doesn't flip it back to the pre-write state."""
+        self._pending.add(control_id)
+        w = self._maybe(None, control_id)
+        if w is not None:
+            w.disabled = True
+
+    def unfreeze(self, control_id: str) -> None:
+        """Release a control once its write has resolved; the next refresh syncs
+        it to the inverter's real state (which, on success, is what was set)."""
+        self._pending.discard(control_id)
+        if self._readonly:
+            return
+        w = self._maybe(None, control_id)
+        if w is not None:
+            w.disabled = False
 
     def _sync_slot(self, prefix: str, idx: int, slot) -> None:
         start = slot.start if slot is not None else None
@@ -361,6 +394,8 @@ class ControlsPanel(VerticalScroll):
 
     def _maybe(self, kind, wid):
         try:
+            if kind is None:
+                return self.query_one(f"#{wid}")
             return self.query_one(f"#{wid}", kind)
         except Exception:
             return None
@@ -369,13 +404,17 @@ class ControlsPanel(VerticalScroll):
 
     @on(Switch.Changed)
     def _on_switch(self, event: Switch.Changed) -> None:
-        if self._syncing or not self._allow_writes or self._caps is None:
+        wid = event.switch.id or ""
+        if wid in self._programmatic:  # our own read-back set, not a user toggle
+            self._programmatic.discard(wid)
+            return
+        if not self._allow_writes or self._caps is None:
             return
         on = event.value
-        if event.switch.id == "enable-charge":
-            self._emit(enable_charge_cmd(on), f"enable charge = {on}")
-        elif event.switch.id == "enable-discharge":
-            self._emit(enable_discharge_cmd(on), f"enable discharge = {on}")
+        if wid == "enable-charge":
+            self._emit(enable_charge_cmd(on), f"enable charge = {on}", wid)
+        elif wid == "enable-discharge":
+            self._emit(enable_discharge_cmd(on), f"enable discharge = {on}", wid)
 
     @on(Input.Submitted)
     def _on_input(self, event: Input.Submitted) -> None:
@@ -396,10 +435,14 @@ class ControlsPanel(VerticalScroll):
             return
         if wid == "charge-target":
             self._emit(
-                charge_target_cmd(parse_soc(value), caps), f"charge target {value}%"
+                charge_target_cmd(parse_soc(value), caps),
+                f"charge target {value}% (also enables charge)",
+                wid,
             )
         elif wid == "soc-reserve":
-            self._emit(soc_reserve_cmd(parse_soc(value), caps), f"SOC reserve {value}%")
+            self._emit(
+                soc_reserve_cmd(parse_soc(value), caps), f"SOC reserve {value}%", wid
+            )
         elif wid[:2] in ("cs", "ds") and ("-start" in wid or "-end" in wid):
             kind, _, endpoint = wid.partition("-")
             idx = int(kind[2:])
@@ -411,7 +454,7 @@ class ControlsPanel(VerticalScroll):
                 fn = charge_slot_end_cmd if charge else discharge_slot_end_cmd
             verb = "charge" if charge else "discharge"
             self._emit(
-                fn(idx, t, caps), f"{verb} slot {idx} {endpoint} = {value or '—'}"
+                fn(idx, t, caps), f"{verb} slot {idx} {endpoint} = {value or '—'}", wid
             )
 
     @on(Button.Pressed, "#reboot")
@@ -439,8 +482,8 @@ class ControlsPanel(VerticalScroll):
                 )
             )
 
-    def _emit(self, requests: Requests, label: str) -> None:
-        self.post_message(self.Apply(requests, label))
+    def _emit(self, requests: Requests, label: str, control_id: str) -> None:
+        self.post_message(self.Apply(requests, label, control_id))
 
 
 def _str_or_blank(value) -> str:
