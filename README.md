@@ -36,7 +36,7 @@ Four views, mirroring the layout of the companion Home Assistant dashboards, plu
 - **Glance** (default) — headline summary: a flow-status sentence, Solar today / Battery SOC / Home now figures, and a chip row with per-battery SOC and today's import/export.
 - **Flow** — three "now" tiles above the animated power-flow topology.
 - **Analyst** — the data-heavy widgets: energy balance ledger, Inverter panel (with collapsible Charge/Discharge Slot sections), and Battery panel.
-- **Controls** — send commands to the inverter: enable/disable charge & discharge, charge target SOC, SOC reserve, and charge/discharge time slots. Everyday changes apply immediately (mirroring the app); the disruptive operations (reboot, SOC recalibration) require typing a confirmation token. **Read-only unless the TUI is launched with `--allow-writes`.**
+- **Controls** — send commands to the inverter: enable/disable charge & discharge, charge target SOC, SOC reserve, and charge/discharge time slots. Everyday changes apply immediately (mirroring the app); the disruptive operations (reboot, SOC recalibration) require typing a confirmation token. **Read-only unless the TUI is launched with `--allow-writes`.** Single-phase inverters only for now — three-phase and EMS use different write paths that haven't been implemented or hardware-tested, so those models get a notice instead of controls.
 
 The status indicator cycles through `Connecting…` / `Probing…` / `Reconnecting…` / `● Connected` / `● Disconnected` to show the live transport state; an automatic reconnect is attempted whenever the connection drops.
 

@@ -47,6 +47,17 @@ class UnsupportedControl(Exception):
     """The requested control isn't available for the detected device topology."""
 
 
+def is_supported(caps: PlantCapabilities) -> bool:
+    """Whether the Controls view can drive this topology.
+
+    Single-phase only for now: three-phase uses different enable registers
+    (set_enable_charge would write the wrong ones), EMS routes charge/discharge
+    through a peer-device API, and gateways aren't inverters — none of which is
+    implemented or testable here. Those models get a read-only notice instead of
+    controls that would mis-write or read fields the model doesn't expose."""
+    return not (caps.is_three_phase or caps.is_ems or caps.is_gateway)
+
+
 # --- phase-aware dispatch -----------------------------------------------------
 
 
@@ -64,12 +75,12 @@ def slot_count(caps: PlantCapabilities) -> int:
     return len(slot_map_for(caps).charge_slots)
 
 
-def enable_charge_cmd(on: bool) -> Requests:
-    return commands.set_enable_charge(on)
+def enable_charge_cmd(enabled: bool) -> Requests:
+    return commands.set_enable_charge(enabled)
 
 
-def enable_discharge_cmd(on: bool) -> Requests:
-    return commands.set_enable_discharge(on)
+def enable_discharge_cmd(enabled: bool) -> Requests:
+    return commands.set_enable_discharge(enabled)
 
 
 def charge_target_cmd(soc: int, caps: PlantCapabilities) -> Requests:
@@ -137,8 +148,13 @@ def parse_hhmm(text: str) -> dt_time | None:
     text = text.strip()
     if not text:
         return None
-    h, _, m = text.partition(":")
-    hour, minute = int(h), int(m)
+    h, sep, m = text.partition(":")
+    try:
+        if not sep:
+            raise ValueError
+        hour, minute = int(h), int(m)
+    except ValueError:
+        raise ValueError("must be HH:MM (00:00–23:59)") from None
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         raise ValueError("must be HH:MM (00:00–23:59)")
     return dt_time(hour, minute)
@@ -310,10 +326,22 @@ class ControlsPanel(VerticalScroll):
         """Construct the control rows for the detected topology (once). Widgets
         are constructed `disabled` in read-only mode — disabling them *after*
         mount wouldn't take, since they aren't queryable until the pump runs."""
+        body = self.query_one("#controls-body", Vertical)
+        if not is_supported(caps):
+            body.mount(
+                Label(
+                    "Controls aren't available for this inverter topology yet — "
+                    "only single-phase models are supported so far. Three-phase "
+                    "and EMS use different write paths that haven't been "
+                    "implemented (or tested on hardware) here.",
+                    id="unsupported-note",
+                )
+            )
+            self._built = True
+            return
         self._caps = caps
         self._slots = slot_count(caps)
         d = self._readonly
-        body = self.query_one("#controls-body", Vertical)
 
         body.mount(Label("Charging", classes="group-title"))
         body.mount(self._row("Enable charge", self._switch("enable-charge")))
@@ -361,6 +389,10 @@ class ControlsPanel(VerticalScroll):
             return
         if not self._built:
             self._build(caps)
+        if self._caps is None:
+            # Unsupported topology: no control widgets, and the single-phase
+            # read-back fields below don't exist on these models.
+            return
 
         self._sync_switch("enable-charge", inv.enable_charge)
         self._sync_switch("enable-discharge", inv.enable_discharge)
@@ -442,11 +474,13 @@ class ControlsPanel(VerticalScroll):
             return
         if not self._allow_writes or self._caps is None:
             return
-        on = event.value
+        enabled = event.value
         if wid == "enable-charge":
-            self._emit(enable_charge_cmd(on), f"enable charge = {on}", wid)
+            self._emit(enable_charge_cmd(enabled), f"enable charge = {enabled}", wid)
         elif wid == "enable-discharge":
-            self._emit(enable_discharge_cmd(on), f"enable discharge = {on}", wid)
+            self._emit(
+                enable_discharge_cmd(enabled), f"enable discharge = {enabled}", wid
+            )
 
     @on(Input.Submitted)
     def _on_input(self, event: Input.Submitted) -> None:

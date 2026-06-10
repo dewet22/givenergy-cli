@@ -36,7 +36,7 @@ from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 
 from givenergy_cli import capabilities_cache
-from givenergy_cli.controls import ConfirmModal, ControlsPanel
+from givenergy_cli.controls import ConfirmModal, ControlsPanel, Requests
 from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
@@ -1331,7 +1331,9 @@ class GivEnergyApp(App):
             self._send_command(message.requests, message.label, None)
 
     @work
-    async def _send_command(self, requests, label: str, control_id: str | None) -> None:
+    async def _send_command(
+        self, requests: Requests, label: str, control_id: str | None
+    ) -> None:
         """Execute a write command list and report the outcome to the log panel.
         The originating control is flashed green/red and unfrozen when the write
         resolves."""

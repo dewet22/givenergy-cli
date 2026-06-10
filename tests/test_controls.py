@@ -64,6 +64,14 @@ def test_single_phase_has_two_slots():
     assert controls.slot_count(_caps()) == 2
 
 
+def test_is_supported_single_phase_only():
+    # Only the single-phase write path is implemented (and hardware-tested);
+    # other topologies use different registers/APIs and must be gated out.
+    assert controls.is_supported(_caps("HYBRID"))
+    for unsupported in ("HYBRID_3PH", "EMS", "GATEWAY"):
+        assert not controls.is_supported(_caps(unsupported))
+
+
 # --- panel via Pilot ---------------------------------------------------------
 
 
@@ -304,6 +312,30 @@ def test_write_result_flashes_control(monkeypatch):
             panel.freeze("enable-charge")
             panel.write_finished("enable-charge", ok=False)
             assert sw.has_class("-write-fail")
+
+    asyncio.run(go())
+
+
+def test_unsupported_topology_shows_notice_not_controls(monkeypatch):
+    """On a topology the dispatch can't drive (EMS here), the panel must show a
+    notice instead of controls — and the read-back sync must not touch the
+    single-phase-only inverter fields (it would AttributeError every tick)."""
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            app.client.plant.capabilities = _caps("EMS")
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)  # builds the notice
+            await pilot.pause(0.2)
+            panel.refresh_from(app.client.plant)  # must be a no-op, not a sync
+            await pilot.pause(0.1)
+            assert app.query("#unsupported-note")
+            assert not app.query(Switch), "no write controls on unsupported models"
 
     asyncio.run(go())
 
