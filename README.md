@@ -48,6 +48,8 @@ uv run givenergy-cli --host 192.168.x.x capture --output frames.log --duration 6
 
 Connects and records raw redacted Modbus frames for the given duration (default 60 s). Writes one line per frame: a UTC timestamp and the hex payload. Serials are redacted in every frame the library can decode; a frame it can't decode is passed through untouched, so it's worth a quick skim before attaching the file to a public issue.
 
+`--duration` is wall-clock coverage: the capture reconnects automatically across dropped connections and quiet stretches (no register updates for `--reconnect-after` seconds, default 60; `0` disables the quiet check), writing every segment to the one file with a `# … reconnected after Ns gap` comment marker on each resumption.
+
 ### `probe` — read an arbitrary register range
 
 ```bash

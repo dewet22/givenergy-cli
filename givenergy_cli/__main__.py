@@ -109,15 +109,28 @@ def capture(
         "--duration",
         "-d",
         min=0.1,
-        help="How long to capture, in seconds.",
+        help="Wall-clock seconds of coverage; reconnects don't extend or reset it.",
+    ),
+    reconnect_after: float = typer.Option(
+        60.0,
+        "--reconnect-after",
+        min=0.0,
+        help="Reconnect if no register update arrives for this many seconds "
+        "(a quiet stream). 0 disables the quiet check, leaving drop-only reconnect.",
     ),
 ) -> None:
-    """Record raw redacted wire frames for a bug report."""
+    """Record raw redacted wire frames for a bug report.
+
+    Reconnects automatically across dropped connections and (unless
+    --reconnect-after 0) quiet stretches, writing all frames to a single file
+    with a comment marker on each resumption.
+    """
     capture_frames(
         host=_require_host(ctx),
         port=ctx.obj["port"],
         output=output,
         duration=duration,
+        reconnect_after=reconnect_after,
     )
 
 
