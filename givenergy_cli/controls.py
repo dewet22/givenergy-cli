@@ -208,9 +208,18 @@ class ControlsPanel(VerticalScroll):
     ControlsPanel .row Label { width: 22; content-align: left middle; height: 3; }
     ControlsPanel Switch { height: 3; }
     ControlsPanel Input { width: 12; }
-    ControlsPanel #writes-hint { color: $warning; margin-bottom: 1; }
+    ControlsPanel #writes-hint {
+        width: 1fr;
+        color: $text;
+        background: $error;
+        text-style: bold;
+        text-align: center;
+        padding: 1 2;
+        margin-bottom: 1;
+        border: round $error;
+    }
     ControlsPanel.-readonly Input, ControlsPanel.-readonly Switch,
-    ControlsPanel.-readonly Button { opacity: 50%; }
+    ControlsPanel.-readonly Button { opacity: 40%; }
     """
 
     class Apply(Message):
@@ -248,7 +257,8 @@ class ControlsPanel(VerticalScroll):
     def compose(self) -> ComposeResult:
         if not self._allow_writes:
             yield Label(
-                "Read-only — relaunch with [b]--allow-writes[/b] to enable controls.",
+                "⚠  READ-ONLY  —  these controls are disabled.\n"
+                "Relaunch with  --allow-writes  to send commands to the inverter.",
                 id="writes-hint",
             )
         # The control rows are built once capabilities are known (slot count
