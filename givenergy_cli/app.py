@@ -514,7 +514,11 @@ class Topology(Static):
         # at col 56 branching up to Load and down to EPS. The kW number is
         # already in the Load and EPS boxes themselves; the trunk's job is to
         # convey magnitude via animation speed.
-        total_out = load + eps
+        # p_load_demand is sensed at the busbar and includes the EPS branch —
+        # same semantics as e_load_day on the energy side — so the trunk
+        # carries `load` and the Loads box shows the house-only remainder.
+        total_out = load
+        load = max(load - eps, 0.0)
         out_c = self._C_LOAD if total_out > idle else DIM
         trunk_speed = self._flow_speed(total_out)
         trunk = self._h_flow(
@@ -732,7 +736,11 @@ class EnergyBalance(Static):
         bat_out = max(0.0, battery)
         bat_in = max(0.0, -battery)
         in_total = pv + grid_in + bat_out
-        out_total = load + eps + grid_out + bat_in
+        # p_load_demand includes the EPS branch (busbar-sensed, mirroring the
+        # documented e_load_day semantics), so EPS is shown as an "of which"
+        # row rather than added on top — adding it double-counted ~all of EPS
+        # in the imbalance figure.
+        out_total = load + grid_out + bat_in
         # Signed imbalance — not the same as conversion losses. The register
         # banks aren't read atomically by the inverter, so individual flows
         # can be sampled tens of ms apart and the totals won't balance even in
@@ -815,7 +823,7 @@ class EnergyBalance(Static):
                 f"{bat_word} (discharge)", bat_out, B, f"{bat_word} (charge)", bat_in, B
             ),
             row("Solar", pv, S, "Load", load, L),
-            row("", None, "", "EPS", eps, E),
+            row("", None, "", "└ of which EPS", eps, E),
             f"  {hdr}  {hdr}",
             row("Total", in_total, INV, "Total", out_total, INV),
             "",
