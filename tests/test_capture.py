@@ -127,4 +127,5 @@ def test_single_segment_no_markers(monkeypatch, tmp_path):
 
     frames, markers = _read(out)
     assert count == 2
+    assert len(frames) == 2
     assert markers == []

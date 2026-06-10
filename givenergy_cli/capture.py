@@ -106,18 +106,18 @@ async def _run(
                 break
 
             client = Client(host=host, port=port)
-            connected = False
             try:
-                try:
-                    await client.connect()
-                    connected = True
-                except _CONNECT_ERRORS:
-                    # Couldn't (re)establish the connection — back off and retry
-                    # until the deadline. Any gap is recorded once we resume.
-                    await asyncio.sleep(min(backoff, max(remaining, 0.0)))
-                    backoff = min(backoff * 2, _BACKOFF_CAP)
-                    continue
+                await client.connect()
+            except _CONNECT_ERRORS:
+                # Couldn't (re)establish the connection — back off and retry until
+                # the deadline. Any gap is recorded once we resume. Nothing to
+                # close: a failed connect leaves no open reader/writer.
+                await asyncio.sleep(min(backoff, max(remaining, 0.0)))
+                backoff = min(backoff * 2, _BACKOFF_CAP)
+                continue
 
+            reason: str | None = None
+            try:
                 backoff = _BACKOFF_INITIAL
                 if pending is not None:
                     prev_reason, interrupted_at = pending
@@ -128,12 +128,12 @@ async def _run(
                 reason = await _capture_segment(
                     client, write_line, remaining, reconnect_after, datetime.now(UTC)
                 )
-                if reason is None:
-                    break
-                pending = (reason, loop.time())
             finally:
-                if connected:
-                    await client.close()
+                await client.close()
+
+            if reason is None:
+                break
+            pending = (reason, loop.time())
 
     return count
 
