@@ -134,7 +134,7 @@ tests/
 
 A few deliberate properties worth knowing:
 
-- **Read-only by design.** Every command only ever *reads* registers — the CLI never issues a Modbus write to the inverter.
+- **Read-only by default.** Every command only ever *reads* registers, with one deliberate exception: the TUI's Controls view can issue writes, and only when launched with `--allow-writes`. Without that flag, no code path sends a Modbus write to the inverter.
 - **The local Modbus-TCP interface is unauthenticated and unencrypted.** That's a property of the GivEnergy hardware, not something this tool can change: anyone who can reach port 8899 can read from the inverter. Keeping the inverter on a segmented network (VLAN/firewall) is the control that matters, and it's yours to apply.
 - **Sharing is redaction-aware.** `export` redacts serial numbers by default (pass `--no-redact` for raw data); `capture` redacts on a best-effort, per-frame basis (see the note above).
 
