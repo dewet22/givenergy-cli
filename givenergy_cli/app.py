@@ -993,6 +993,9 @@ class GivEnergyApp(App):
     ]
 
     SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    # Consecutive all-devices-silent refreshes tolerated before forcing a
+    # reconnect (partial refreshes never count toward this).
+    _FAILED_STREAK_LIMIT: ClassVar[int] = 3
 
     def __init__(
         self,
@@ -1017,6 +1020,12 @@ class GivEnergyApp(App):
         self._refreshing_since: datetime | None = None
         self._reconnecting = False
         self._status_frame = 0
+        # Partial refreshes are routine on this hardware — absorbed but surfaced
+        # in the status bar. RefreshFailed means *no* device replied; a streak of
+        # those means the link is wedged despite the socket being up, so we
+        # escalate to a reconnect.
+        self._last_refresh_partial = False
+        self._refresh_failed_streak = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1058,6 +1067,7 @@ class GivEnergyApp(App):
         except RefreshPartiallySucceeded as exc:
             # Flaky first refresh — keep the partial data that was committed.
             modbus_logger.warning("Startup refresh incomplete: %s", exc)
+            self._last_refresh_partial = True
             self._last_refresh_at = datetime.now()
             self._snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -1095,12 +1105,30 @@ class GivEnergyApp(App):
             # Some reads failed — routine on this hardware. Whatever succeeded
             # has already been committed to the plant, so treat it as a refresh;
             # the library logs the per-read failures at WARNING for the log panel.
+            self._last_refresh_partial = True
+            self._refresh_failed_streak = 0
             self._last_refresh_at = datetime.now()
             self._snapshot()
-        except RefreshFailed, TimeoutError:
+        except RefreshFailed:
+            # No device replied at all — the socket is up but the plant is
+            # effectively unreachable. Tolerate a couple (the dongle has bad
+            # moments), then force a reconnect via the existing machinery:
+            # close() drops `connected`, and the status-bar tick re-dials.
+            self._refresh_failed_streak += 1
+            if self._refresh_failed_streak >= self._FAILED_STREAK_LIMIT:
+                logging.getLogger("givenergy_modbus").warning(
+                    "%d consecutive refreshes with no devices responding — "
+                    "forcing a reconnect",
+                    self._refresh_failed_streak,
+                )
+                self._refresh_failed_streak = 0
+                await self.client.close()
+        except TimeoutError:
             # Nothing usable this tick — keep showing the previous data.
             pass
         else:
+            self._last_refresh_partial = False
+            self._refresh_failed_streak = 0
             self._last_refresh_at = datetime.now()
             self._snapshot()
         finally:
@@ -1142,16 +1170,20 @@ class GivEnergyApp(App):
         elif self._last_refresh_at is None:
             refresh_label.update("[dim]Updated: never[/dim]")
         else:
+            # Flag a partial refresh so degraded data is visible at a glance.
+            partial = (
+                " [yellow]· partial[/yellow]" if self._last_refresh_partial else ""
+            )
             delta = int((datetime.now() - self._last_refresh_at).total_seconds())
             if delta < 60:
-                refresh_label.update(f"[dim]Updated {delta}s ago[/dim]")
+                refresh_label.update(f"[dim]Updated {delta}s ago[/dim]{partial}")
             elif delta < 3600:
                 refresh_label.update(
-                    f"[dim]Updated {delta // 60}m ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                    f"[dim]Updated {delta // 60}m ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]{partial}"
                 )
             else:
                 refresh_label.update(
-                    f"[dim]Updated {delta // 3600}h ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                    f"[dim]Updated {delta // 3600}h ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]{partial}"
                 )
 
     def action_quick_refresh(self) -> None:

@@ -139,12 +139,69 @@ def test_tui_survives_partial_refresh(monkeypatch):
             # and have recorded the (partial) refresh rather than failing.
             await pilot.pause(0.2)
             assert app._last_refresh_at is not None
+            assert app._last_refresh_partial is True
             first = app._last_refresh_at
             # Periodic path: drive another partial refresh through the worker.
             app._periodic_refresh()
             await pilot.pause(0.2)
             assert app._last_refresh_at is not None
             assert app._last_refresh_at >= first
+            assert app._last_refresh_partial is True
+            # Partials never count toward the failed streak.
+            assert app._refresh_failed_streak == 0
+            assert app.is_running
+
+    asyncio.run(drive())
+
+
+def test_tui_reconnects_after_failed_refresh_streak(monkeypatch):
+    """RefreshFailed means no device replied at all; after a tolerated streak
+    the app force-closes the client so the auto-reconnect machinery re-dials."""
+    from givenergy_modbus.exceptions import RefreshFailed
+
+    import givenergy_cli.app as app_mod
+
+    class FakeClient:
+        def __init__(self, host, port):
+            from givenergy_modbus.model.plant import Plant
+
+            self.plant = Plant()
+            self.connected = True
+            self.close_count = 0
+
+        async def connect(self):
+            pass
+
+        async def detect(self, **kw):
+            return None
+
+        async def load_config(self, **kw):
+            pass
+
+        async def refresh(self, **kw):
+            raise RefreshFailed(
+                "all register reads failed",
+                failures=[],
+                cause=ExceptionGroup("reads", [TimeoutError()]),
+            )
+
+        async def close(self):
+            self.close_count += 1
+            self.connected = False
+
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def drive():
+        app = app_mod.GivEnergyApp(host="127.0.0.1", refresh_interval=3600)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.2)
+            # Startup refresh failed entirely → no data yet, app still up.
+            client = app.client
+            for _ in range(app._FAILED_STREAK_LIMIT):
+                app._periodic_refresh()
+                await pilot.pause(0.1)
+            assert client.close_count == 1  # escalated exactly once
+            assert client.connected is False  # reconnect machinery takes over
             assert app.is_running
 
     asyncio.run(drive())
