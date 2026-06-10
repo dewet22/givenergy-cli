@@ -158,7 +158,7 @@ class InverterPanel(PlantPanel):
         ("status", "Status", lambda inv, p: str(inv.status)),
         ("heatsink", "Heatsink", lambda inv, p: f"{inv.t_inverter_heatsink} °C"),
         ("charger", "Charger", lambda inv, p: f"{inv.t_charger} °C"),
-        ("uptime", "Uptime", lambda inv, p: f"{inv.work_time_total} h"),
+        ("uptime", "Uptime", lambda inv, p: f"{inv.work_time_total_hours} h"),
     ]
     _SECTIONS: ClassVar[list[tuple[str, list[tuple[str, str, Getter]]]]] = [
         (
