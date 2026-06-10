@@ -278,6 +278,36 @@ def test_ctrl_pagedown_cycles_tabs(monkeypatch):
     asyncio.run(go())
 
 
+def test_write_result_flashes_control(monkeypatch):
+    """A resolved write flashes the control green (ok) or red (fail) and clears
+    the in-flight tint."""
+    monkeypatch.setattr(app_mod, "Client", FakeClient)
+
+    async def go():
+        app = app_mod.GivEnergyApp(
+            host="127.0.0.1", refresh_interval=3600, allow_writes=True
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            panel = app.query_one(controls.ControlsPanel)
+            panel.refresh_from(app.client.plant)
+            await pilot.pause(0.2)
+            sw = app.query_one("#enable-charge", Switch)
+
+            panel.freeze("enable-charge")
+            assert sw.has_class("-pending")
+            panel.write_finished("enable-charge", ok=True)
+            assert not sw.has_class("-pending")
+            assert sw.has_class("-write-ok")
+            assert not sw.has_class("-write-fail")
+
+            panel.freeze("enable-charge")
+            panel.write_finished("enable-charge", ok=False)
+            assert sw.has_class("-write-fail")
+
+    asyncio.run(go())
+
+
 def test_readback_does_not_emit_write(monkeypatch):
     """Syncing a switch from the plant (e.g. external state change) must not be
     mistaken for a user toggle and emit a spurious write-back."""

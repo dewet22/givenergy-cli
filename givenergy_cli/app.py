@@ -1333,18 +1333,21 @@ class GivEnergyApp(App):
     @work
     async def _send_command(self, requests, label: str, control_id: str | None) -> None:
         """Execute a write command list and report the outcome to the log panel.
-        Always unfreezes the originating control when the write resolves."""
+        The originating control is flashed green/red and unfrozen when the write
+        resolves."""
         logger = logging.getLogger("givenergy_modbus")
+        ok = False
         try:
             await self.client.one_shot_command(requests)
         except Exception as exc:  # noqa: BLE001 — surface any write failure, don't crash
             logger.warning("write failed (%s): %r", label, exc)
             self.notify(f"Write failed: {label}", severity="error", timeout=5)
         else:
+            ok = True
             logger.info("applied: %s", label)
             # Re-read so the panels reflect the new state promptly.
             self._next_refresh_full = True
             self._periodic_refresh()
         finally:
             if control_id is not None:
-                self.query_one(ControlsPanel).unfreeze(control_id)
+                self.query_one(ControlsPanel).write_finished(control_id, ok)

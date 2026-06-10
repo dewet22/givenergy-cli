@@ -231,8 +231,14 @@ class ControlsPanel(VerticalScroll):
     ControlsPanel.-readonly Button { opacity: 40%; }
     /* Write in flight — tint without disabling, so focus isn't stolen. */
     ControlsPanel .-pending { background: $warning 25%; }
+    /* Brief flash on write resolution — a clearer cue than the corner toast. */
+    ControlsPanel .-write-ok { background: $success 50%; }
+    ControlsPanel .-write-fail { background: $error 50%; }
     ControlsPanel Input.-invalid { border: tall $error; }
     """
+
+    # How long the green/red write-result flash stays on a control.
+    _FLASH_SECONDS = 1.2
 
     class Apply(Message):
         """An everyday control changed — apply *requests* immediately. The
@@ -400,6 +406,17 @@ class ControlsPanel(VerticalScroll):
         w = self._maybe(None, control_id)
         if w is not None:
             w.remove_class("-pending")
+
+    def write_finished(self, control_id: str, ok: bool) -> None:
+        """Release a frozen control and flash it green (ok) or red (failed) for
+        a moment — a more noticeable cue than the corner toast."""
+        self.unfreeze(control_id)
+        w = self._maybe(None, control_id)
+        if w is None:
+            return
+        flash = "-write-ok" if ok else "-write-fail"
+        w.add_class(flash)
+        self.set_timer(self._FLASH_SECONDS, lambda: w.remove_class(flash))
 
     def _sync_slot(self, prefix: str, idx: int, slot) -> None:
         start = slot.start if slot is not None else None
