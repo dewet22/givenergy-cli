@@ -26,10 +26,15 @@ from textual.widgets import (
 )
 
 from givenergy_modbus.client.client import Client
-from givenergy_modbus.exceptions import CommunicationError
+from givenergy_modbus.exceptions import (
+    CommunicationError,
+    RefreshFailed,
+    RefreshPartiallySucceeded,
+)
 from givenergy_modbus.model.inverter import SinglePhaseInverter
 from givenergy_modbus.model.plant import Plant
 
+from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
     History,
@@ -232,8 +237,10 @@ class Topology(Static):
     }
     """
 
-    # Below this threshold (kW) we treat a flow as "idle" — neutral arrow, dimmed text.
-    _IDLE_THRESHOLD: ClassVar[float] = 0.05
+    # Below this threshold (kW) we treat a flow as "idle" — neutral arrow, dimmed
+    # text. Shared with the Glance view's flow_status so the headline sentence
+    # and the diagram always classify flows identically.
+    _IDLE_THRESHOLD: ClassVar[float] = IDLE_THRESHOLD
     # Window driving the in-box sparklines (PV, load, EPS, SOC).
     _SPARKLINE_WINDOW_S: ClassVar[float] = 420.0  # ~7 min
 
@@ -507,7 +514,12 @@ class Topology(Static):
         # at col 56 branching up to Load and down to EPS. The kW number is
         # already in the Load and EPS boxes themselves; the trunk's job is to
         # convey magnitude via animation speed.
-        total_out = load + eps
+        # p_load_demand is sensed at the busbar and includes the EPS branch
+        # (confirmed against the modbus capture corpus: (IR24−IR30)−IR42 sits
+        # at ~0 with EPS active), so the trunk carries `load` and the Loads
+        # box shows the house-only remainder.
+        total_out = load
+        load = max(load - eps, 0.0)
         out_c = self._C_LOAD if total_out > idle else DIM
         trunk_speed = self._flow_speed(total_out)
         trunk = self._h_flow(
@@ -725,7 +737,11 @@ class EnergyBalance(Static):
         bat_out = max(0.0, battery)
         bat_in = max(0.0, -battery)
         in_total = pv + grid_in + bat_out
-        out_total = load + eps + grid_out + bat_in
+        # p_load_demand includes the EPS branch (busbar-sensed; confirmed from
+        # the modbus capture corpus), so EPS is shown as an "of which" row
+        # rather than added on top — adding it double-counted ~all of EPS in
+        # the imbalance figure.
+        out_total = load + grid_out + bat_in
         # Signed imbalance — not the same as conversion losses. The register
         # banks aren't read atomically by the inverter, so individual flows
         # can be sampled tens of ms apart and the totals won't balance even in
@@ -808,7 +824,7 @@ class EnergyBalance(Static):
                 f"{bat_word} (discharge)", bat_out, B, f"{bat_word} (charge)", bat_in, B
             ),
             row("Solar", pv, S, "Load", load, L),
-            row("", None, "", "EPS", eps, E),
+            row("", None, "", "└ of which EPS", eps, E),
             f"  {hdr}  {hdr}",
             row("Total", in_total, INV, "Total", out_total, INV),
             "",
@@ -851,7 +867,7 @@ class EnergyBalance(Static):
             pv_day = latest.pv_day
             gi_day = latest.e_grid_in_day
             go_day = latest.e_grid_out_day
-            load_day = latest.e_load_day
+            load_day = latest.e_consumption_day
             bc_day = latest.e_battery_charge_day
             bd_day = latest.e_battery_discharge_day
 
@@ -952,9 +968,10 @@ class GivEnergyApp(App):
     CSS = """
     Screen { layout: vertical; }
     #tabs { height: 1fr; }
-    #live-layout { height: 1fr; }
-    #live-left { width: auto; height: 100%; }
-    #live-right { width: 1fr; height: 100%; }
+    #flow-layout { height: 1fr; }
+    #analyst-layout { height: 1fr; }
+    #analyst-left { width: auto; height: 100%; }
+    #analyst-right { width: 1fr; height: 100%; }
     #log-panel {
         display: none;
         height: 10;
@@ -976,14 +993,18 @@ class GivEnergyApp(App):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "quick_refresh", "Refresh"),
         Binding("shift+r", "full_refresh", "Full refresh"),
-        Binding("1", "show_live", "Live"),
-        Binding("2", "show_energy", "Energy"),
+        Binding("1", "show_glance", "Glance"),
+        Binding("2", "show_flow", "Flow"),
+        Binding("3", "show_analyst", "Analyst"),
         Binding("l", "toggle_log", "Logs"),
         # Binding("c", "calibrate", "Calibrate SOC"),
         Binding("q", "quit", "Quit"),
     ]
 
     SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    # Consecutive all-devices-silent refreshes tolerated before forcing a
+    # reconnect (partial refreshes never count toward this).
+    _FAILED_STREAK_LIMIT: ClassVar[int] = 3
 
     def __init__(
         self,
@@ -1008,23 +1029,29 @@ class GivEnergyApp(App):
         self._refreshing_since: datetime | None = None
         self._reconnecting = False
         self._status_frame = 0
+        # Partial refreshes are routine on this hardware — absorbed but surfaced
+        # in the status bar. RefreshFailed means *no* device replied; a streak of
+        # those means the link is wedged despite the socket being up, so we
+        # escalate to a reconnect.
+        self._last_refresh_partial = False
+        self._refresh_failed_streak = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent(initial="live-tab", id="tabs"):
-            with TabPane("Live", id="live-tab"):
-                with Horizontal(id="live-layout"):
-                    with Vertical(id="live-left"):
-                        yield Topology(id="topology")
+        with TabbedContent(initial="glance-tab", id="tabs"):
+            with TabPane("Glance", id="glance-tab"):
+                yield GlancePanel(id="glance")
+            with TabPane("Flow", id="flow-tab"):
+                with Vertical(id="flow-layout"):
+                    yield TileRow(id="flow-tiles")
+                    yield Topology(id="topology")
+            with TabPane("Analyst", id="analyst-tab"):
+                with Horizontal(id="analyst-layout"):
+                    with Vertical(id="analyst-left"):
                         yield EnergyBalance(id="energy-balance")
-                    with Vertical(id="live-right"):
+                    with Vertical(id="analyst-right"):
                         yield InverterPanel()
                         yield BatteryPanel()
-            with TabPane("Energy", id="energy-tab"):
-                yield Label(
-                    "Energy view — node graph + ledger (coming next phase)",
-                    id="energy-placeholder",
-                )
         yield RichLog(id="log-panel", highlight=True, markup=True)
         with Horizontal(id="status-bar"):
             yield Label("", id="last-refresh")
@@ -1044,6 +1071,12 @@ class GivEnergyApp(App):
             self.client.plant.capabilities = await self.client.detect()
             await self.client.load_config()
             await self.client.refresh()
+            self._last_refresh_at = datetime.now()
+            self._snapshot()
+        except RefreshPartiallySucceeded as exc:
+            # Flaky first refresh — keep the partial data that was committed.
+            modbus_logger.warning("Startup refresh incomplete: %s", exc)
+            self._last_refresh_partial = True
             self._last_refresh_at = datetime.now()
             self._snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -1077,9 +1110,34 @@ class GivEnergyApp(App):
             if full:
                 await self.client.load_config()
             await self.client.refresh()
+        except RefreshPartiallySucceeded:
+            # Some reads failed — routine on this hardware. Whatever succeeded
+            # has already been committed to the plant, so treat it as a refresh;
+            # the library logs the per-read failures at WARNING for the log panel.
+            self._last_refresh_partial = True
+            self._refresh_failed_streak = 0
+            self._last_refresh_at = datetime.now()
+            self._snapshot()
+        except RefreshFailed:
+            # No device replied at all — the socket is up but the plant is
+            # effectively unreachable. Tolerate a couple (the dongle has bad
+            # moments), then force a reconnect via the existing machinery:
+            # close() drops `connected`, and the status-bar tick re-dials.
+            self._refresh_failed_streak += 1
+            if self._refresh_failed_streak >= self._FAILED_STREAK_LIMIT:
+                logging.getLogger("givenergy_modbus").warning(
+                    "%d consecutive refreshes with no devices responding — "
+                    "forcing a reconnect",
+                    self._refresh_failed_streak,
+                )
+                self._refresh_failed_streak = 0
+                await self.client.close()
         except TimeoutError:
+            # Nothing usable this tick — keep showing the previous data.
             pass
         else:
+            self._last_refresh_partial = False
+            self._refresh_failed_streak = 0
             self._last_refresh_at = datetime.now()
             self._snapshot()
         finally:
@@ -1096,6 +1154,8 @@ class GivEnergyApp(App):
 
     def _update_panels(self) -> None:
         plant = self.client.plant
+        self.query_one(GlancePanel).refresh_from(plant)
+        self.query_one(TileRow).refresh_from(plant)
         self.query_one(Topology).refresh_from(plant)
         self.query_one(EnergyBalance).refresh_from(plant)
         self.query_one(InverterPanel).refresh_from(plant)
@@ -1119,16 +1179,20 @@ class GivEnergyApp(App):
         elif self._last_refresh_at is None:
             refresh_label.update("[dim]Updated: never[/dim]")
         else:
+            # Flag a partial refresh so degraded data is visible at a glance.
+            partial = (
+                " [yellow]· partial[/yellow]" if self._last_refresh_partial else ""
+            )
             delta = int((datetime.now() - self._last_refresh_at).total_seconds())
             if delta < 60:
-                refresh_label.update(f"[dim]Updated {delta}s ago[/dim]")
+                refresh_label.update(f"[dim]Updated {delta}s ago[/dim]{partial}")
             elif delta < 3600:
                 refresh_label.update(
-                    f"[dim]Updated {delta // 60}m ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                    f"[dim]Updated {delta // 60}m ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]{partial}"
                 )
             else:
                 refresh_label.update(
-                    f"[dim]Updated {delta // 3600}h ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]"
+                    f"[dim]Updated {delta // 3600}h ago at {self._last_refresh_at.strftime('%H:%M')}[/dim]{partial}"
                 )
 
     def action_quick_refresh(self) -> None:
@@ -1143,11 +1207,14 @@ class GivEnergyApp(App):
         log = self.query_one("#log-panel", RichLog)
         log.display = not log.display
 
-    def action_show_live(self) -> None:
-        self.query_one(TabbedContent).active = "live-tab"
+    def action_show_glance(self) -> None:
+        self.query_one(TabbedContent).active = "glance-tab"
 
-    def action_show_energy(self) -> None:
-        self.query_one(TabbedContent).active = "energy-tab"
+    def action_show_flow(self) -> None:
+        self.query_one(TabbedContent).active = "flow-tab"
+
+    def action_show_analyst(self) -> None:
+        self.query_one(TabbedContent).active = "analyst-tab"
 
     # async def action_calibrate(self) -> None:
     #     if self.client.connected:
