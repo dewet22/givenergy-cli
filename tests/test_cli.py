@@ -186,3 +186,68 @@ def test_export_plant_redacts_serials(monkeypatch):
         assert redacted_str == "CE2231G000"
     finally:
         out.unlink(missing_ok=True)
+
+
+def test_inspect_rejects_malformed_json(tmp_path):
+    """A file that isn't JSON produces a clean error, not a traceback."""
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ this is not json")
+    r = runner.invoke(cli.app, ["inspect", str(bad)], env={"COLUMNS": "200"})
+    assert r.exit_code != 0
+    assert "not a valid plant export" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_inspect_rejects_wrong_shape(tmp_path):
+    """Valid JSON with the wrong structure produces a clean error."""
+    bad = tmp_path / "shape.json"
+    bad.write_text('{"unexpected": "structure"}')
+    r = runner.invoke(cli.app, ["inspect", str(bad)], env={"COLUMNS": "200"})
+    assert r.exit_code != 0
+    assert "not a valid plant export" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_inspect_rejects_oversized_file(tmp_path, monkeypatch):
+    """A file over the import size cap is rejected before being read."""
+    import givenergy_cli.registers as registers
+
+    monkeypatch.setattr(registers, "_MAX_IMPORT_BYTES", 1024)
+    big = tmp_path / "big.json"
+    big.write_text("x" * 2048)
+    r = runner.invoke(cli.app, ["inspect", str(big)], env={"COLUMNS": "200"})
+    assert r.exit_code != 0
+    assert "too large" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_mock_server_rejects_oversized_capture(tmp_path, monkeypatch):
+    """mock-server applies the same size cap to capture files."""
+    import givenergy_cli.registers as registers
+
+    monkeypatch.setattr(registers, "_MAX_IMPORT_BYTES", 1024)
+    big = tmp_path / "big.log"
+    big.write_text("x" * 2048)
+    r = runner.invoke(
+        cli.app, ["mock-server", "--capture", str(big)], env={"COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert "too large" in r.output
+
+
+def test_model_table_escapes_markup():
+    """Device-controlled strings render literally, not as Rich markup."""
+    from rich.console import Console
+
+    from givenergy_cli.registers import _model_table
+
+    class StubModel:
+        def model_dump(self):
+            return {"serial": "[red]evil[/red][link=https://example.com]x[/link]"}
+
+    console = Console(record=True, width=200)
+    console.print(_model_table("Stub", StubModel()))
+    text = console.export_text()
+    # If markup were interpreted, the tags would be consumed by the renderer.
+    assert "[red]evil[/red]" in text
+    assert "[link=" in text

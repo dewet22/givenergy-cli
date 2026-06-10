@@ -7,6 +7,7 @@ from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
 from givenergy_cli.mock import serve_mock
 from givenergy_cli.registers import (
+    check_import_size,
     export_plant,
     load_plant,
     probe_registers,
@@ -202,7 +203,12 @@ def inspect(
     ),
 ) -> None:
     """Reconstruct a plant from an exported JSON file and dump it."""
-    plant = load_plant(path)
+    try:
+        plant = load_plant(path)
+    except ValueError as exc:
+        # These files arrive as bug-report attachments — a malformed or
+        # oversized one should produce a clean message, not a traceback.
+        raise typer.BadParameter(str(exc), param_hint="PATH") from exc
     show_plant(plant)
 
 
@@ -241,6 +247,11 @@ def mock_server(
             f"Port must be between 0 and 65535; got {port}.",
             param_hint="'--port'",
         )
+    for capture_path in captures:
+        try:
+            check_import_size(capture_path)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="'--capture'") from exc
     serve_mock(captures=captures, bind=bind, port=port, log_level=log_level.value)
 
 

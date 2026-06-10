@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from givenergy_modbus.client.client import Client
@@ -120,7 +121,8 @@ def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> 
     with _silence_shutdown_noise():
         plant, error = asyncio.run(_capture(host, port))
     if error:
-        console.print(f"[yellow]Warning:[/yellow] {error}")
+        # Error strings can embed exception reprs wrapping network-derived bytes.
+        console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
     payload = {
         "inverter_serial_number": (
             Converter.redact_serial(plant.inverter_serial_number)
@@ -157,20 +159,39 @@ def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> 
     )
 
 
+# An honest export is tens of KB; these files arrive as bug-report attachments,
+# so refuse anything implausibly large before reading it into memory.
+_MAX_IMPORT_BYTES = 8 * 1024 * 1024
+
+
+def check_import_size(path: Path) -> None:
+    """Raise ValueError if *path* is too large to be a plausible export/capture."""
+    size = path.stat().st_size
+    if size > _MAX_IMPORT_BYTES:
+        raise ValueError(
+            f"{path} is {size:,} bytes — too large to be a plausible "
+            f"export/capture (limit {_MAX_IMPORT_BYTES // (1024 * 1024)} MB)"
+        )
+
+
 def load_plant(path: Path) -> Plant:
-    data = json.loads(path.read_text())
-    caches = {
-        int(addr, 16): _deserialise_cache(cache_data)
-        for addr, cache_data in data["register_caches"].items()
-    }
-    caps_data = data.get("capabilities")
-    capabilities = PlantCapabilities.from_dict(caps_data) if caps_data else None
-    return Plant(
-        register_caches=caches,
-        capabilities=capabilities,
-        inverter_serial_number=data["inverter_serial_number"],
-        data_adapter_serial_number=data["data_adapter_serial_number"],
-    )
+    check_import_size(path)
+    try:
+        data = json.loads(path.read_text())
+        caches = {
+            int(addr, 16): _deserialise_cache(cache_data)
+            for addr, cache_data in data["register_caches"].items()
+        }
+        caps_data = data.get("capabilities")
+        capabilities = PlantCapabilities.from_dict(caps_data) if caps_data else None
+        return Plant(
+            register_caches=caches,
+            capabilities=capabilities,
+            inverter_serial_number=data["inverter_serial_number"],
+            data_adapter_serial_number=data["data_adapter_serial_number"],
+        )
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(f"{path} is not a valid plant export: {exc}") from exc
 
 
 type _DecodableModel = (
@@ -191,7 +212,9 @@ def _model_table(title: str, model: _DecodableModel) -> Table:
     for field, value in model.model_dump().items():
         if value is None or value == "":
             continue
-        table.add_row(field, str(value))
+        # Values decode from device-controlled register bytes — escape so a
+        # crafted string can't smuggle Rich markup into the rendered table.
+        table.add_row(field, escape(str(value)))
     return table
 
 
@@ -285,8 +308,12 @@ def show_plant(plant: Plant) -> None:
         1 for _, _, b in decoded if isinstance(b, Battery) and b.is_valid()
     )
     console.rule("[bold green]Plant Identity[/bold green]")
-    console.print(f"Inverter serial: [bold]{plant.inverter_serial_number}[/bold]")
-    console.print(f"Adapter serial:  [bold]{plant.data_adapter_serial_number}[/bold]")
+    console.print(
+        f"Inverter serial: [bold]{escape(str(plant.inverter_serial_number))}[/bold]"
+    )
+    console.print(
+        f"Adapter serial:  [bold]{escape(str(plant.data_adapter_serial_number))}[/bold]"
+    )
     if plant.capabilities:
         _print_capabilities(console, plant.capabilities)
     else:
@@ -329,7 +356,7 @@ def show_plant(plant: Plant) -> None:
                 console.print(_model_table(title, item))
             else:
                 console.print(
-                    f"[yellow]Battery #{slot} (device 0x{addr:02x}): {item}[/yellow]"
+                    f"[yellow]Battery #{slot} (device 0x{addr:02x}): {escape(item)}[/yellow]"
                 )
 
     console.rule("[bold green]Register Dump (debug)[/bold green]")
@@ -386,7 +413,7 @@ async def _probe(
     try:
         await client.connect()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Connection failed:[/red] {exc}")
+        console.print(f"[red]Connection failed:[/red] {escape(str(exc))}")
         return
 
     table = Table(
@@ -434,7 +461,7 @@ async def _probe(
             except Exception as exc:  # noqa: BLE001
                 console.print(
                     f"[red]  {reg_label}({chunk_base}..{chunk_base + chunk - 1}): "
-                    f"error — {exc}[/red]"
+                    f"error — {escape(str(exc))}[/red]"
                 )
             offset += chunk
     finally:

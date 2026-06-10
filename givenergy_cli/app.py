@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, ClassVar
 
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -935,9 +936,11 @@ class ModbusLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         colour = self.LEVEL_COLOURS.get(record.levelno, "white")
+        # Log messages routinely embed network-derived bytes (exception reprs,
+        # frame dumps) — escape so they can't inject markup into the RichLog.
         self.log_widget.write(
             f"[{colour}]{record.levelname:<8}[/{colour}] "
-            f"[dim]{record.name}[/dim]  {record.getMessage()}"
+            f"[dim]{record.name}[/dim]  {escape(record.getMessage())}"
         )
 
 

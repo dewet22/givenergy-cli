@@ -38,6 +38,9 @@ def capture_frames(host: str, port: int, output: Path, duration: float) -> None:
     console.print(f"Capturing redacted frames for {duration:g}s → {output}")
     with _silence_shutdown_noise():
         count = asyncio.run(_run(host, port, output, duration))
+    # Redaction happens upstream per-frame; frames the library can't decode are
+    # passed through untouched, so don't promise more than is guaranteed.
     console.print(
-        f"Wrote [bold]{count}[/bold] frame(s) — safe to attach to a GitHub issue."
+        f"Wrote [bold]{count}[/bold] frame(s) — serials redacted in all decodable "
+        f"frames. Worth a skim before attaching to a public issue."
     )
