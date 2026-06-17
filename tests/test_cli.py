@@ -98,17 +98,22 @@ def test_probe_compact_flag(monkeypatch):
 
 
 def test_render_probe_compact_is_hex_dump():
-    """Compact rendering is a header comment plus one LABEL(base,count): hex line
-    per chunk, with no box-drawing table characters to mangle a copy-paste."""
+    """Compact rendering is a `#` provenance comment plus device-inline
+    `0x<dev>:<BANK>(base,count) <hex>` rows (modbus 2.4.0 `to_compact` grammar),
+    with no box-drawing table characters to mangle a copy-paste."""
     from givenergy_cli.registers import _render_probe_compact
 
     out = _render_probe_compact(
         "HR", 0x31, "192.168.1.5", 8899, [(4080, [0, 5, 0xFFFF]), (4140, [1])]
     )
     lines = out.splitlines()
-    assert lines[0] == "# HR probe @ device 0x31 on 192.168.1.5:8899"
-    assert lines[1] == "HR(4080,3): 00000005ffff"
-    assert lines[2] == "HR(4140,1): 0001"
+    assert lines[0] == (
+        "# givenergy-cli probe of device 0x31 (HR 4080..4140) on 192.168.1.5:8899"
+    )
+    assert lines[1] == "0x31:HR(4080,3) 00000005ffff"
+    assert lines[2] == "0x31:HR(4140,1) 0001"
+    # provenance line must not be mis-read as a legacy `probe @ device` header
+    assert "probe @ device" not in out
     assert not any(ch in out for ch in "┃━┏┓┗┛│─")
 
 
@@ -283,55 +288,6 @@ def test_inspect_rejects_oversized_file(tmp_path, monkeypatch):
     assert "Traceback" not in r.output
 
 
-def test_parse_probe_dump_roundtrips_render():
-    """A compact dump parses back to exactly the registers it rendered."""
-    from givenergy_cli.registers import _render_probe_compact, parse_probe_dump
-
-    chunks = [(0, [0x2001, 0x0003, 0x0832]), (60, [0x05DC])]
-    text = _render_probe_compact("HR", 0x31, "10.0.0.1", 8899, chunks)
-    assert parse_probe_dump(text) == {
-        0x31: {
-            "HR(0)": 0x2001,
-            "HR(1)": 0x0003,
-            "HR(2)": 0x0832,
-            "HR(60)": 0x05DC,
-        }
-    }
-
-
-def test_parse_probe_dump_ignores_status_and_timeout_lines():
-    """The 'Probing …' line and 'timed out' diagnostics are not parsed as data."""
-    from givenergy_cli.registers import parse_probe_dump
-
-    text = "\n".join(
-        [
-            "Probing HR(0..119) at device 0x31 on 10.0.0.1:8899…",
-            "  HR(60..119): timed out — no response",
-            "# HR probe @ device 0x31 on 10.0.0.1:8899",
-            "HR(0,2): 00010002",
-        ]
-    )
-    assert parse_probe_dump(text) == {0x31: {"HR(0)": 1, "HR(1)": 2}}
-
-
-def test_parse_probe_dump_merges_devices_and_banks():
-    """Concatenated sections across devices and banks merge into one map."""
-    from givenergy_cli.registers import parse_probe_dump
-
-    text = "\n".join(
-        [
-            "# HR probe @ device 0x31 on h:1",
-            "HR(0,1): 0001",
-            "# IR probe @ device 0x32 on h:1",
-            "IR(0,2): 000a000b",
-        ]
-    )
-    assert parse_probe_dump(text) == {
-        0x31: {"HR(0)": 1},
-        0x32: {"IR(0)": 0x000A, "IR(1)": 0x000B},
-    }
-
-
 def test_load_capture_reads_export_json(tmp_path):
     """An export JSON loads into a Plant carrying its register caches."""
     from givenergy_cli.registers import load_capture
@@ -362,6 +318,20 @@ def test_load_capture_reads_probe_dump(tmp_path):
     assert 0x31 in plant.register_caches
     assert len(plant.register_caches[0x31]) == 3
     assert plant.capabilities is None
+
+
+def test_load_capture_reads_legacy_probe_dump(tmp_path):
+    """Pre-2.4.0 dumps (old `# … probe @ device` header form) still load, via
+    parse_compact's transitional legacy path — guards the format changeover."""
+    from givenergy_cli.registers import load_capture
+
+    dump = tmp_path / "old.txt"
+    dump.write_text(
+        "# HR probe @ device 0x31 on 10.0.0.1:8899\nHR(0,3): 000000050832\n"
+    )
+    plant = load_capture(dump)
+    assert 0x31 in plant.register_caches
+    assert len(plant.register_caches[0x31]) == 3
 
 
 def test_load_capture_bails_on_unrecognised(tmp_path):
