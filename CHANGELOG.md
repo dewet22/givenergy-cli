@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.6.0] - 2026-06-17
+
+### ✨ Added
+
+- interactive REPL with a reconstructed plant (#70) ([0820097](https://github.com/dewet22/givenergy-cli/commit/082009762986bbd744dd021352754461c4bc3420))
+
 ## [1.5.2] - 2026-06-17
 
 ### 🐛 Fixed
