@@ -111,6 +111,24 @@ def test_render_probe_compact_is_hex_dump():
     assert not any(ch in out for ch in "┃━┏┓┗┛│─")
 
 
+def test_render_probe_compact_not_folded_by_console():
+    """A 240-char chunk line must reach the terminal as one logical line. Rich
+    word-wraps space-less text to the console width unless soft_wrap is set, which
+    would fold the hex and split it from its label — these flags must match the
+    _probe call site."""
+    from io import StringIO
+
+    from rich.console import Console
+
+    from givenergy_cli.registers import _render_probe_compact
+
+    block = _render_probe_compact("HR", 0x31, "h", 1, [(0, list(range(60)))])
+    console = Console(file=StringIO(), width=80)
+    console.print(block, markup=False, highlight=False, soft_wrap=True)
+    # Header + one chunk line = exactly two emitted lines, no folding.
+    assert console.file.getvalue().count("\n") == 2
+
+
 def test_mock_server_requires_capture():
     """--capture is mandatory."""
     r = runner.invoke(cli.app, ["mock-server"], env={"COLUMNS": "200"})

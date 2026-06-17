@@ -506,10 +506,14 @@ async def _probe(
             "[yellow]No registers responded. The block may not exist on this device.[/yellow]"
         )
     elif compact:
+        # soft_wrap keeps each chunk on a single logical line: without it Rich
+        # word-wraps the space-less hex to the console width, folding the dump
+        # and splitting the label from its data — defeating the copy-paste point.
         console.print(
             _render_probe_compact(reg_label, device_address, host, port, chunks),
             markup=False,
             highlight=False,
+            soft_wrap=True,
         )
     else:
         table = Table(
