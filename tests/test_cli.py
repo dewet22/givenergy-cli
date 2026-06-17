@@ -68,6 +68,49 @@ def test_base_out_of_range():
     assert "between 0 and 65535" in r.output
 
 
+def test_probe_compact_default(monkeypatch):
+    """probe forwards compact=False by default."""
+    calls = []
+    monkeypatch.setattr(cli, "probe_registers", lambda **kw: calls.append(kw))
+    r = runner.invoke(
+        cli.app,
+        ["probe", "--type", "hr", "--base", "10"],
+        env={"GIVENERGY_HOST": "127.0.0.1"},
+    )
+    assert r.exit_code == 0, r.output
+    assert calls[0]["compact"] is False
+
+
+def test_probe_compact_flag(monkeypatch):
+    """--compact and its --terse alias both forward compact=True."""
+    calls = []
+    monkeypatch.setattr(cli, "probe_registers", lambda **kw: calls.append(kw))
+    for flag in ("--compact", "--terse"):
+        r = runner.invoke(
+            cli.app,
+            ["probe", "--type", "hr", "--base", "10", flag],
+            env={"GIVENERGY_HOST": "127.0.0.1"},
+        )
+        assert r.exit_code == 0, r.output
+    assert calls[0]["compact"] is True
+    assert calls[1]["compact"] is True
+
+
+def test_render_probe_compact_is_hex_dump():
+    """Compact rendering is a header comment plus one LABEL(base,count): hex line
+    per chunk, with no box-drawing table characters to mangle a copy-paste."""
+    from givenergy_cli.registers import _render_probe_compact
+
+    out = _render_probe_compact(
+        "HR", 0x31, "192.168.1.5", 8899, [(4080, [0, 5, 0xFFFF]), (4140, [1])]
+    )
+    lines = out.splitlines()
+    assert lines[0] == "# HR probe @ device 0x31 on 192.168.1.5:8899"
+    assert lines[1] == "HR(4080,3): 00000005ffff"
+    assert lines[2] == "HR(4140,1): 0001"
+    assert not any(ch in out for ch in "┃━┏┓┗┛│─")
+
+
 def test_mock_server_requires_capture():
     """--capture is mandatory."""
     r = runner.invoke(cli.app, ["mock-server"], env={"COLUMNS": "200"})

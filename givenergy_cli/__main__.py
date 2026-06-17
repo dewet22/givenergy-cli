@@ -184,6 +184,13 @@ def probe(
         help="Modbus device address to target, decimal or 0x-hex "
         "(e.g. 0x11 for inverter, 0x31 for AC).",
     ),
+    compact: bool = typer.Option(
+        False,
+        "--compact",
+        "--terse",
+        help="Print results as plain one-line-per-register text instead of a "
+        "table — easier to copy and paste into a bug report.",
+    ),
 ) -> None:
     """Read an arbitrary register range directly from the inverter.
 
@@ -216,6 +223,7 @@ def probe(
         device_address=device_address,
         base=base,
         count=count,
+        compact=compact,
     )
 
 
