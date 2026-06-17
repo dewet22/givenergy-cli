@@ -396,6 +396,27 @@ def _print_hv_stack(console: Console, stack: HvStack) -> None:
         )
 
 
+def _render_probe_compact(
+    reg_label: str,
+    device_address: int,
+    host: str,
+    port: int,
+    chunks: list[tuple[int, list[int]]],
+) -> str:
+    """Render probe results as a compact, copy-paste-friendly hex dump (no table).
+
+    A leading ``#`` comment line carries the device/host context, then one line
+    per responding chunk in the form ``LABEL(base,count): <hex>`` — each register
+    is four hex chars, concatenated, so a 60-register chunk is 240 chars wide.
+    """
+    header = f"# {reg_label} probe @ device 0x{device_address:02x} on {host}:{port}"
+    lines = [
+        f"{reg_label}({base},{len(values)}): " + "".join(f"{v:04x}" for v in values)
+        for base, values in chunks
+    ]
+    return "\n".join([header, *lines])
+
+
 def probe_registers(
     host: str,
     port: int,
@@ -403,15 +424,19 @@ def probe_registers(
     device_address: int,
     base: int,
     count: int,
+    compact: bool = False,
 ) -> None:
     """Issue a raw holding or input register read and print the results.
 
     Issues one or more sequential requests of up to 60 registers each.
     A timeout or exception response is reported per-request rather than
-    aborting the whole probe.
+    aborting the whole probe. With ``compact`` set, results print as plain
+    one-line-per-register text instead of a table.
     """
     with _silence_shutdown_noise():
-        asyncio.run(_probe(host, port, register_type, device_address, base, count))
+        asyncio.run(
+            _probe(host, port, register_type, device_address, base, count, compact)
+        )
 
 
 async def _probe(
@@ -421,6 +446,7 @@ async def _probe(
     device_address: int,
     base: int,
     count: int,
+    compact: bool = False,
 ) -> None:
     console = Console()
     reg_label = "HR" if register_type == "hr" else "IR"
@@ -437,16 +463,8 @@ async def _probe(
         console.print(f"[red]Connection failed:[/red] {escape(str(exc))}")
         return
 
-    table = Table(
-        title=f"{reg_label} probe @ device 0x{device_address:02x}",
-        show_header=True,
-        header_style="bold yellow",
-    )
-    table.add_column("Register", style="cyan", no_wrap=True)
-    table.add_column("Decimal", justify="right")
-    table.add_column("Hex", justify="right", style="dim")
-
     # Issue requests in chunks of at most 60 registers.
+    chunks: list[tuple[int, list[int]]] = []
     offset = 0
     any_response = False
     try:
@@ -467,12 +485,7 @@ async def _probe(
                 response = await client.send_request_and_await_response(
                     request, timeout=3.0, retries=1
                 )
-                for i, val in enumerate(response.register_values):
-                    table.add_row(
-                        f"{reg_label}({chunk_base + i})",
-                        str(val),
-                        f"0x{val:04x}",
-                    )
+                chunks.append((chunk_base, list(response.register_values)))
                 any_response = True
             except TimeoutError:
                 console.print(
@@ -488,9 +501,26 @@ async def _probe(
     finally:
         await client.close()
 
-    if any_response:
-        console.print(table)
-    else:
+    if not any_response:
         console.print(
             "[yellow]No registers responded. The block may not exist on this device.[/yellow]"
         )
+    elif compact:
+        console.print(
+            _render_probe_compact(reg_label, device_address, host, port, chunks),
+            markup=False,
+            highlight=False,
+        )
+    else:
+        table = Table(
+            title=f"{reg_label} probe @ device 0x{device_address:02x}",
+            show_header=True,
+            header_style="bold yellow",
+        )
+        table.add_column("Register", style="cyan", no_wrap=True)
+        table.add_column("Decimal", justify="right")
+        table.add_column("Hex", justify="right", style="dim")
+        for base, values in chunks:
+            for i, val in enumerate(values):
+                table.add_row(f"{reg_label}({base + i})", str(val), f"0x{val:04x}")
+        console.print(table)
