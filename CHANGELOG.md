@@ -9,6 +9,16 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.5.1] - 2026-06-17
+
+### ✨ Added
+
+- add --compact/--terse hex-dump output (#68) ([1a3b738](https://github.com/dewet22/givenergy-cli/commit/1a3b7385aba3dd5383855e63e3a5206f4f752ee7))
+
+### 🐛 Fixed
+
+- fetch full history in release checkout; backfill changelog (#67) ([5e68891](https://github.com/dewet22/givenergy-cli/commit/5e688912e770c94b5aa2c9d4c971b13aa08b51ab))
+
 ## [1.5.0] - 2026-06-10
 
 ### ✨ Added
