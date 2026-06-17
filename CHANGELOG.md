@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.5.2] - 2026-06-17
+
+### 🐛 Fixed
+
+- keep compact hex lines unwrapped (#69) ([6818f1b](https://github.com/dewet22/givenergy-cli/commit/6818f1bb72d2dde254f9199593d28d3cb7434491))
+
 ## [1.5.1] - 2026-06-17
 
 ### ✨ Added
