@@ -139,7 +139,13 @@ class EnergyCounters:
             e_grid_in_total=inv.e_grid_in_total,
             e_grid_out_total=inv.e_grid_out_total,
             e_inverter_in_total=inv.e_inverter_in_total,
-            e_inverter_out_total=inv.e_inverter_out_total,
+            # Single-phase exposes PV-generation-total as e_pv_generation_total
+            # (IR45/46); three-phase keeps a genuine, distinct e_inverter_out_total
+            # (IR1362/3) and has no e_pv_generation_total. Prefer the new name,
+            # fall back to the deprecated alias only where it's the native field.
+            e_inverter_out_total=_first_field(
+                inv, "e_pv_generation_total", "e_inverter_out_total"
+            ),
             e_pv1_day=inv.e_pv1_day,
             e_pv2_day=inv.e_pv2_day,
             e_grid_in_day=inv.e_grid_in_day,
