@@ -131,6 +131,10 @@ async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
             error = "all register reads failed — inverter may be offline (returning partial data)"
         except Exception as exc:  # noqa: BLE001
             error = f"refresh failed: {exc!r} (returning partial data)"
+    except OSError as exc:
+        # Connect itself failed (host down, refused, unreachable) — surface it as
+        # an error string rather than letting an OSError crash the caller.
+        error = f"connection failed: {exc!r} (no data captured)"
     finally:
         await client.close()
     return client.plant, error
@@ -218,7 +222,7 @@ def _build_plant(
 def load_plant(path: Path) -> Plant:
     check_import_size(path)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         caches = {
             int(addr, 16): _deserialise_cache(cache_data)
             for addr, cache_data in data["register_caches"].items()
@@ -287,7 +291,7 @@ def load_capture(path: Path) -> Plant:
     ``.ems``, …) may be limited. Raises ValueError if the file is neither.
     """
     check_import_size(path)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     try:
         data = json.loads(text)
         is_export = isinstance(data, dict) and "register_caches" in data

@@ -391,17 +391,58 @@ def test_shell_loads_file_into_namespace(tmp_path, monkeypatch):
     assert set(captured["ns"]) >= {"plant", "caches", "batteries", "show", "console"}
 
 
-def test_shell_live_snapshots_via_seam(monkeypatch):
+def test_shell_live_snapshots_via_seam(tmp_path, monkeypatch):
     """With no file, shell snapshots live and forwards that plant (never connects)."""
-    from givenergy_modbus.model.plant import Plant
+    from givenergy_cli.registers import _render_probe_compact, load_capture
 
-    fake = Plant()
+    dump = tmp_path / "d.txt"
+    dump.write_text(_render_probe_compact("HR", 0x31, "h", 1, [(0, [1, 2, 3])]))
+    fake = load_capture(dump)  # a plant with actual register data
     monkeypatch.setattr(cli, "snapshot_plant", lambda host, port: (fake, None))
     captured = {}
     monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: captured.update(ns=ns))
     r = runner.invoke(cli.app, ["shell"], env={"GIVENERGY_HOST": "127.0.0.1"})
     assert r.exit_code == 0, r.output
     assert captured["ns"]["plant"] is fake
+
+
+def test_shell_live_aborts_on_empty_capture(monkeypatch):
+    """A failed live capture exits cleanly instead of opening an empty REPL."""
+    from givenergy_modbus.model.plant import Plant
+
+    monkeypatch.setattr(
+        cli,
+        "snapshot_plant",
+        lambda host, port: (Plant(), "connection failed: refused"),
+    )
+    opened = []
+    monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: opened.append(True))
+    r = runner.invoke(
+        cli.app, ["shell"], env={"GIVENERGY_HOST": "127.0.0.1", "COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert not opened  # never dropped into a REPL with no data
+
+
+def test_snapshot_plant_reports_connection_failure(monkeypatch):
+    """A connection failure comes back as an error string, never a raw OSError."""
+    import givenergy_cli.registers as registers
+    from givenergy_modbus.model.plant import Plant
+
+    class _FailingClient:
+        def __init__(self, host, port):
+            self.plant = Plant()
+
+        async def connect(self):
+            raise OSError("connection refused")
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(registers, "Client", _FailingClient)
+    plant, error = registers.snapshot_plant("127.0.0.1", 8899)
+    assert isinstance(plant, Plant)
+    assert error is not None and "connection failed" in error
 
 
 def test_shell_requires_host_without_file():

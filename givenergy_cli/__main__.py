@@ -1,3 +1,4 @@
+import contextlib
 from enum import Enum
 from pathlib import Path
 
@@ -285,6 +286,14 @@ def _start_shell(namespace: dict, banner: str) -> None:
             "(install the 'shell' extra for an IPython shell: "
             "pip install 'givenergy-cli[shell]')"
         )
+        # Opt-in tab completion over the namespace; readline is absent on some
+        # platforms (e.g. stock Windows), so degrade quietly if it can't load.
+        with contextlib.suppress(ImportError):
+            import readline
+            import rlcompleter
+
+            readline.set_completer(rlcompleter.Completer(namespace).complete)
+            readline.parse_and_bind("tab: complete")
         code.interact(banner="", local=namespace)
     else:
         start_ipython(argv=[], user_ns=namespace)
@@ -328,6 +337,9 @@ def shell(
         plant, error = snapshot_plant(host, port)
         if error:
             console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
+        if not any(plant.register_caches.values()):
+            console.print("[red]No data captured — nothing to inspect.[/red]")
+            raise typer.Exit(1)
         source = f"{host}:{port} (live)"
 
     namespace = {
