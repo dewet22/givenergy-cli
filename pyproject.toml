@@ -13,6 +13,11 @@ dependencies = [
     "platformdirs>=4.9.6,<5.0.0",
 ]
 
+[project.optional-dependencies]
+# Richer `shell` REPL (tab-completion, history, %magics). Without it, `shell`
+# falls back to the stdlib REPL — so this stays optional, not a runtime dep.
+shell = ["ipython>=8.0.0"]
+
 [project.urls]
 Homepage = "https://github.com/dewet22/givenergy-cli"
 Repository = "https://github.com/dewet22/givenergy-cli"
