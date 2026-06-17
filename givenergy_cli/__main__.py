@@ -1,17 +1,24 @@
+import contextlib
 from enum import Enum
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.markup import escape
+
+from givenergy_modbus.model.plant import Plant
 
 from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
 from givenergy_cli.mock import serve_mock
 from givenergy_cli.registers import (
+    _decode_batteries,
     check_import_size,
     export_plant,
-    load_plant,
+    load_capture,
     probe_registers,
     show_plant,
+    snapshot_plant,
 )
 
 
@@ -234,17 +241,115 @@ def inspect(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Path to a JSON file produced by `export`.",
+        help="An `export` JSON file or a `probe --compact` dump.",
     ),
 ) -> None:
-    """Reconstruct a plant from an exported JSON file and dump it."""
+    """Reconstruct a plant from an export JSON or probe dump and dump it."""
     try:
-        plant = load_plant(path)
+        plant = load_capture(path)
     except ValueError as exc:
         # These files arrive as bug-report attachments — a malformed or
         # oversized one should produce a clean message, not a traceback.
         raise typer.BadParameter(str(exc), param_hint="PATH") from exc
     show_plant(plant)
+
+
+def _shell_banner(plant: Plant, source: str) -> str:
+    """Plain-text banner summarising the loaded plant and the shell namespace."""
+    lines = [f"GivEnergy shell — loaded from {source}"]
+    caps = plant.capabilities
+    if caps:
+        lines.append(f"  device:   {caps.device_type}")
+    if plant.inverter_serial_number:
+        lines.append(f"  inverter: {plant.inverter_serial_number}")
+    n_dev = sum(1 for c in plant.register_caches.values() if c)
+    n_reg = sum(len(c) for c in plant.register_caches.values())
+    lines.append(f"  loaded:   {n_reg} registers across {n_dev} device address(es)")
+    if not caps:
+        lines.append(
+            "  note:     no capabilities — typed views (plant.inverter, .ems …) "
+            "limited; raw `caches` available"
+        )
+    lines.append("  names:    plant, caches, batteries, show(), console")
+    return "\n".join(lines)
+
+
+def _start_shell(namespace: dict, banner: str) -> None:
+    """Drop into IPython if the `[shell]` extra is installed, else the stdlib REPL."""
+    print(banner)
+    try:
+        from IPython import start_ipython
+    except ImportError:
+        import code
+
+        print(
+            "(install the 'shell' extra for an IPython shell: "
+            "pip install 'givenergy-cli[shell]')"
+        )
+        # Opt-in tab completion over the namespace; readline is absent on some
+        # platforms (e.g. stock Windows), so degrade quietly if it can't load.
+        with contextlib.suppress(ImportError):
+            import readline
+            import rlcompleter
+
+            readline.set_completer(rlcompleter.Completer(namespace).complete)
+            readline.parse_and_bind("tab: complete")
+        code.interact(banner="", local=namespace)
+    else:
+        start_ipython(argv=[], user_ns=namespace)
+
+
+@app.command()
+def shell(
+    ctx: typer.Context,
+    path: Path | None = typer.Argument(
+        None,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="An `export` JSON or `probe --compact` dump to load offline. "
+        "Omit to snapshot a live inverter via --host.",
+    ),
+) -> None:
+    """Drop into an interactive Python shell with a reconstructed `plant`.
+
+    Loads a plant from a file (export JSON or probe dump), or — with no file —
+    takes a one-shot live snapshot via --host. The namespace exposes `plant`,
+    `caches`, `batteries`, `show()` and `console`. Uses IPython if installed
+    (the `[shell]` extra), otherwise the stdlib REPL.
+
+    Examples:
+
+        givenergy-cli shell plant.json        # offline, from an export
+        givenergy-cli --host 192.168.1.x shell  # live snapshot
+    """
+    console = Console()
+    if path is not None:
+        try:
+            plant = load_capture(path)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="PATH") from exc
+        source = str(path)
+    else:
+        host = _require_host(ctx)
+        port = ctx.obj["port"]
+        console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
+        plant, error = snapshot_plant(host, port)
+        if error:
+            console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
+        if not any(plant.register_caches.values()):
+            console.print("[red]No data captured — nothing to inspect.[/red]")
+            raise typer.Exit(1)
+        source = f"{host}:{port} (live)"
+
+    namespace = {
+        "plant": plant,
+        "caches": plant.register_caches,
+        "batteries": _decode_batteries(plant),
+        "show": lambda: show_plant(plant),
+        "console": console,
+    }
+    _start_shell(namespace, _shell_banner(plant, source))
 
 
 @app.command("mock-server")

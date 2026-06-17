@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
@@ -130,16 +131,25 @@ async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
             error = "all register reads failed — inverter may be offline (returning partial data)"
         except Exception as exc:  # noqa: BLE001
             error = f"refresh failed: {exc!r} (returning partial data)"
+    except OSError as exc:
+        # Connect itself failed (host down, refused, unreachable) — surface it as
+        # an error string rather than letting an OSError crash the caller.
+        error = f"connection failed: {exc!r} (no data captured)"
     finally:
         await client.close()
     return client.plant, error
 
 
+def snapshot_plant(host: str, port: int) -> tuple[Plant, str | None]:
+    """Take a one-shot live snapshot — connect, capture, close. Returns (plant, error)."""
+    with _silence_shutdown_noise():
+        return asyncio.run(_capture(host, port))
+
+
 def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> None:
     console = Console()
     console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
-    with _silence_shutdown_noise():
-        plant, error = asyncio.run(_capture(host, port))
+    plant, error = snapshot_plant(host, port)
     if error:
         # Error strings can embed exception reprs wrapping network-derived bytes.
         console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
@@ -195,24 +205,104 @@ def check_import_size(path: Path) -> None:
         )
 
 
+def _build_plant(
+    caches: dict[int, RegisterCache],
+    capabilities: PlantCapabilities | None,
+    inverter_serial_number: str = "",
+    data_adapter_serial_number: str = "",
+) -> Plant:
+    return Plant(
+        register_caches=caches,
+        capabilities=capabilities,
+        inverter_serial_number=inverter_serial_number,
+        data_adapter_serial_number=data_adapter_serial_number,
+    )
+
+
 def load_plant(path: Path) -> Plant:
     check_import_size(path)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         caches = {
             int(addr, 16): _deserialise_cache(cache_data)
             for addr, cache_data in data["register_caches"].items()
         }
         caps_data = data.get("capabilities")
         capabilities = PlantCapabilities.from_dict(caps_data) if caps_data else None
-        return Plant(
-            register_caches=caches,
-            capabilities=capabilities,
-            inverter_serial_number=data["inverter_serial_number"],
-            data_adapter_serial_number=data["data_adapter_serial_number"],
+        return _build_plant(
+            caches,
+            capabilities,
+            data["inverter_serial_number"],
+            data["data_adapter_serial_number"],
         )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ValueError(f"{path} is not a valid plant export: {exc}") from exc
+
+
+# A compact-probe data row, e.g. "HR(4080,60): 0000...". The count (comma form)
+# is what distinguishes a data row from the "HR(180..239): timed out" diagnostic
+# lines, which use "..", so those are ignored without special-casing.
+_PROBE_HEADER_RE = re.compile(
+    r"^#\s*(?:HR|IR)\s+probe\s+@\s+device\s+0x([0-9a-fA-F]+)\b"
+)
+_PROBE_ROW_RE = re.compile(r"^(HR|IR)\((\d+),(\d+)\):\s*([0-9a-fA-F]+)\s*$")
+
+
+def parse_probe_dump(text: str) -> dict[int, dict[str, int]]:
+    """Parse the output of `probe --compact` back into a per-device register map.
+
+    Returns ``{device_address: {"HR(n)"/"IR(n)": value}}``. Unrecognised lines
+    (the "Probing …" status line, "timed out" diagnostics, blanks) are ignored,
+    so a redirected stdout capture parses cleanly. Multiple probe sections —
+    across devices, banks, or concatenated dumps — merge into one map.
+    """
+    result: dict[int, dict[str, int]] = {}
+    device: int | None = None
+    for line in text.splitlines():
+        header = _PROBE_HEADER_RE.match(line)
+        if header:
+            device = int(header.group(1), 16)
+            continue
+        row = _PROBE_ROW_RE.match(line)
+        if not row or device is None:
+            continue
+        label, base_s, count_s, hexstr = row.groups()
+        base, count = int(base_s), int(count_s)
+        if len(hexstr) != count * 4:
+            continue  # malformed row — skip rather than mis-slice
+        bank = result.setdefault(device, {})
+        for i in range(count):
+            bank[f"{label}({base + i})"] = int(hexstr[i * 4 : i * 4 + 4], 16)
+    return result
+
+
+def _caches_from_dump_map(
+    dump: dict[int, dict[str, int]],
+) -> dict[int, RegisterCache]:
+    return {addr: _deserialise_cache(data) for addr, data in dump.items()}
+
+
+def load_capture(path: Path) -> Plant:
+    """Reconstruct a Plant from either an `export` JSON or a `probe --compact` dump.
+
+    The format is auto-detected. Probe-sourced plants carry register caches but no
+    capabilities — the inverter model can't reliably be resolved offline, and for
+    new hardware the raw registers are the point — so typed views (``.inverter``,
+    ``.ems``, …) may be limited. Raises ValueError if the file is neither.
+    """
+    check_import_size(path)
+    text = path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+        is_export = isinstance(data, dict) and "register_caches" in data
+    except ValueError:
+        is_export = False
+    if is_export:
+        return load_plant(path)
+    dump = parse_probe_dump(text)
+    if dump:
+        return _build_plant(_caches_from_dump_map(dump), capabilities=None)
+    raise ValueError(f"not a recognised plant export or probe dump: {path}")
 
 
 type _DecodableModel = (

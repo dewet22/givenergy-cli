@@ -74,6 +74,9 @@ Issues raw Modbus read requests, bypassing the normal capability-driven polling.
 | `--base` / `-b` | First register address (decimal or `0x`-hex) | required |
 | `--count` / `-n` | Number of registers to read | `60` |
 | `--device` / `-d` | Modbus device address, decimal or `0x`-hex (e.g. `0x11` inverter, `0x31` AC) | `0x11` |
+| `--compact` / `--terse` | Plain one-line-per-chunk hex dump instead of a table — easy to copy-paste, and loadable by [`shell`](#shell--interactive-python-shell-with-a-reconstructed-plant) / [`inspect`](#inspect--render-an-exported-plant) | off |
+
+Redirect a compact probe to a file (`probe … --compact > dump.txt`) and you have a register dump you can reconstruct a plant from — handy for new hardware that `export` can't yet `detect`.
 
 ### `export` — dump registers to a portable JSON file
 
@@ -87,9 +90,21 @@ Connects, runs `detect` to discover the plant topology, loads the holding-regist
 
 ```bash
 uv run givenergy-cli inspect plant.json
+uv run givenergy-cli inspect dump.txt    # a probe --compact dump works too
 ```
 
-Reconstructs the `Plant` from the JSON, then prints the Inverter and Battery model fields plus per-device raw register dumps (decimal + hex). No network required.
+Reconstructs the `Plant` from an `export` JSON **or** a `probe --compact` dump, then prints the Inverter and Battery model fields plus per-device raw register dumps (decimal + hex). No network required. (Probe-sourced plants carry raw registers but no detected capabilities, so the typed model views may be limited.)
+
+### `shell` — interactive Python shell with a reconstructed plant
+
+```bash
+uv run givenergy-cli shell plant.json            # offline, from an export or probe dump
+uv run givenergy-cli --host 192.168.x.x shell    # one-shot live snapshot
+```
+
+Drops you into an interactive Python REPL with the reconstructed `plant` ready to poke at. With a file argument it loads an `export` JSON or `probe --compact` dump offline; with no file it takes a single live snapshot via `--host` and closes the socket. The namespace exposes `plant`, `caches` (the raw register caches), `batteries`, `show()` (the full `inspect`-style dump) and `console`.
+
+Install the `shell` extra (`pip install 'givenergy-cli[shell]'`) for an IPython shell with tab-completion and history; without it, the standard-library REPL is used.
 
 ### `mock-server` — serve a fake plant from recorded captures
 

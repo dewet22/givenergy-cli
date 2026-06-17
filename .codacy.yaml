@@ -8,3 +8,7 @@ exclude_paths:
   # (it's the point of the file, and already public in pyproject.toml);
   # Codacy's PII check flags it otherwise.
   - 'SECURITY.md'
+  # The lockfile is generated, not source. Its package URLs/hashes (e.g. a
+  # transitive parso sdist hash) match Codacy's gitleaks secret patterns and
+  # produce false positives — there are no real secrets in a uv.lock.
+  - 'uv.lock'

@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 import givenergy_cli.__main__ as cli
+import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -255,7 +256,7 @@ def test_inspect_rejects_malformed_json(tmp_path):
     bad.write_text("{ this is not json")
     r = runner.invoke(cli.app, ["inspect", str(bad)], env={"COLUMNS": "200"})
     assert r.exit_code != 0
-    assert "not a valid plant export" in r.output
+    assert "not a recognised plant export or probe dump" in r.output
     assert "Traceback" not in r.output
 
 
@@ -265,7 +266,7 @@ def test_inspect_rejects_wrong_shape(tmp_path):
     bad.write_text('{"unexpected": "structure"}')
     r = runner.invoke(cli.app, ["inspect", str(bad)], env={"COLUMNS": "200"})
     assert r.exit_code != 0
-    assert "not a valid plant export" in r.output
+    assert "not a recognised plant export or probe dump" in r.output
     assert "Traceback" not in r.output
 
 
@@ -279,6 +280,176 @@ def test_inspect_rejects_oversized_file(tmp_path, monkeypatch):
     r = runner.invoke(cli.app, ["inspect", str(big)], env={"COLUMNS": "200"})
     assert r.exit_code != 0
     assert "too large" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_parse_probe_dump_roundtrips_render():
+    """A compact dump parses back to exactly the registers it rendered."""
+    from givenergy_cli.registers import _render_probe_compact, parse_probe_dump
+
+    chunks = [(0, [0x2001, 0x0003, 0x0832]), (60, [0x05DC])]
+    text = _render_probe_compact("HR", 0x31, "10.0.0.1", 8899, chunks)
+    assert parse_probe_dump(text) == {
+        0x31: {
+            "HR(0)": 0x2001,
+            "HR(1)": 0x0003,
+            "HR(2)": 0x0832,
+            "HR(60)": 0x05DC,
+        }
+    }
+
+
+def test_parse_probe_dump_ignores_status_and_timeout_lines():
+    """The 'Probing …' line and 'timed out' diagnostics are not parsed as data."""
+    from givenergy_cli.registers import parse_probe_dump
+
+    text = "\n".join(
+        [
+            "Probing HR(0..119) at device 0x31 on 10.0.0.1:8899…",
+            "  HR(60..119): timed out — no response",
+            "# HR probe @ device 0x31 on 10.0.0.1:8899",
+            "HR(0,2): 00010002",
+        ]
+    )
+    assert parse_probe_dump(text) == {0x31: {"HR(0)": 1, "HR(1)": 2}}
+
+
+def test_parse_probe_dump_merges_devices_and_banks():
+    """Concatenated sections across devices and banks merge into one map."""
+    from givenergy_cli.registers import parse_probe_dump
+
+    text = "\n".join(
+        [
+            "# HR probe @ device 0x31 on h:1",
+            "HR(0,1): 0001",
+            "# IR probe @ device 0x32 on h:1",
+            "IR(0,2): 000a000b",
+        ]
+    )
+    assert parse_probe_dump(text) == {
+        0x31: {"HR(0)": 1},
+        0x32: {"IR(0)": 0x000A, "IR(1)": 0x000B},
+    }
+
+
+def test_load_capture_reads_export_json(tmp_path):
+    """An export JSON loads into a Plant carrying its register caches."""
+    from givenergy_cli.registers import load_capture
+
+    export = tmp_path / "plant.json"
+    export.write_text(
+        json.dumps(
+            {
+                "inverter_serial_number": "",
+                "data_adapter_serial_number": "",
+                "capabilities": None,
+                "register_caches": {"0x32": {"HR(0)": 1, "HR(1)": 2}},
+            }
+        )
+    )
+    plant = load_capture(export)
+    assert 0x32 in plant.register_caches
+    assert len(plant.register_caches[0x32]) == 2
+
+
+def test_load_capture_reads_probe_dump(tmp_path):
+    """A probe dump loads into a Plant: caches present, capabilities absent."""
+    from givenergy_cli.registers import _render_probe_compact, load_capture
+
+    dump = tmp_path / "dump.txt"
+    dump.write_text(_render_probe_compact("HR", 0x31, "h", 1, [(0, [1, 2, 3])]))
+    plant = load_capture(dump)
+    assert 0x31 in plant.register_caches
+    assert len(plant.register_caches[0x31]) == 3
+    assert plant.capabilities is None
+
+
+def test_load_capture_bails_on_unrecognised(tmp_path):
+    """A file that is neither export nor probe dump raises a clean ValueError."""
+    from givenergy_cli.registers import load_capture
+
+    junk = tmp_path / "junk.txt"
+    junk.write_text("hello world\nthis is not a register dump")
+    with pytest.raises(ValueError, match="not a recognised"):
+        load_capture(junk)
+
+
+def test_shell_loads_file_into_namespace(tmp_path, monkeypatch):
+    """shell FILE builds a Plant from the file and forwards it to the REPL seam."""
+    from givenergy_cli.registers import _render_probe_compact
+
+    captured = {}
+    monkeypatch.setattr(
+        cli, "_start_shell", lambda ns, banner: captured.update(ns=ns, banner=banner)
+    )
+    dump = tmp_path / "dump.txt"
+    dump.write_text(_render_probe_compact("HR", 0x31, "h", 1, [(0, [1, 2, 3])]))
+    r = runner.invoke(cli.app, ["shell", str(dump)])
+    assert r.exit_code == 0, r.output
+    plant = captured["ns"]["plant"]
+    assert 0x31 in plant.register_caches
+    assert set(captured["ns"]) >= {"plant", "caches", "batteries", "show", "console"}
+
+
+def test_shell_live_snapshots_via_seam(tmp_path, monkeypatch):
+    """With no file, shell snapshots live and forwards that plant (never connects)."""
+    from givenergy_cli.registers import _render_probe_compact, load_capture
+
+    dump = tmp_path / "d.txt"
+    dump.write_text(_render_probe_compact("HR", 0x31, "h", 1, [(0, [1, 2, 3])]))
+    fake = load_capture(dump)  # a plant with actual register data
+    monkeypatch.setattr(cli, "snapshot_plant", lambda host, port: (fake, None))
+    captured = {}
+    monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: captured.update(ns=ns))
+    r = runner.invoke(cli.app, ["shell"], env={"GIVENERGY_HOST": "127.0.0.1"})
+    assert r.exit_code == 0, r.output
+    assert captured["ns"]["plant"] is fake
+
+
+def test_shell_live_aborts_on_empty_capture(monkeypatch):
+    """A failed live capture exits cleanly instead of opening an empty REPL."""
+    from givenergy_modbus.model.plant import Plant
+
+    monkeypatch.setattr(
+        cli,
+        "snapshot_plant",
+        lambda host, port: (Plant(), "connection failed: refused"),
+    )
+    opened = []
+    monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: opened.append(True))
+    r = runner.invoke(
+        cli.app, ["shell"], env={"GIVENERGY_HOST": "127.0.0.1", "COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert not opened  # never dropped into a REPL with no data
+
+
+def test_snapshot_plant_reports_connection_failure(monkeypatch):
+    """A connection failure comes back as an error string, never a raw OSError."""
+    import givenergy_cli.registers as registers
+    from givenergy_modbus.model.plant import Plant
+
+    class _FailingClient:
+        def __init__(self, host, port):
+            self.plant = Plant()
+
+        async def connect(self):
+            raise OSError("connection refused")
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(registers, "Client", _FailingClient)
+    plant, error = registers.snapshot_plant("127.0.0.1", 8899)
+    assert isinstance(plant, Plant)
+    assert error is not None and "connection failed" in error
+
+
+def test_shell_requires_host_without_file():
+    """No file and no host is a clean BadParameter, not a traceback."""
+    r = runner.invoke(cli.app, ["shell"], env={"COLUMNS": "200"})
+    assert r.exit_code != 0
+    assert "host" in r.output.lower()
     assert "Traceback" not in r.output
 
 
