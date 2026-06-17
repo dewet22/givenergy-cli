@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
@@ -26,7 +25,11 @@ from givenergy_modbus.model.inverter_threephase import ThreePhaseInverter
 from givenergy_modbus.model.meter import Meter
 from givenergy_modbus.model.plant import Plant, PlantCapabilities
 from givenergy_modbus.model.register import Register
-from givenergy_modbus.model.register_cache import RegisterCache
+from givenergy_modbus.model.register_cache import (
+    RegisterCache,
+    parse_compact,
+    to_compact,
+)
 from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegistersRequest
 
 
@@ -239,49 +242,6 @@ def load_plant(path: Path) -> Plant:
         raise ValueError(f"{path} is not a valid plant export: {exc}") from exc
 
 
-# A compact-probe data row, e.g. "HR(4080,60): 0000...". The count (comma form)
-# is what distinguishes a data row from the "HR(180..239): timed out" diagnostic
-# lines, which use "..", so those are ignored without special-casing.
-_PROBE_HEADER_RE = re.compile(
-    r"^#\s*(?:HR|IR)\s+probe\s+@\s+device\s+0x([0-9a-fA-F]+)\b"
-)
-_PROBE_ROW_RE = re.compile(r"^(HR|IR)\((\d+),(\d+)\):\s*([0-9a-fA-F]+)\s*$")
-
-
-def parse_probe_dump(text: str) -> dict[int, dict[str, int]]:
-    """Parse the output of `probe --compact` back into a per-device register map.
-
-    Returns ``{device_address: {"HR(n)"/"IR(n)": value}}``. Unrecognised lines
-    (the "Probing …" status line, "timed out" diagnostics, blanks) are ignored,
-    so a redirected stdout capture parses cleanly. Multiple probe sections —
-    across devices, banks, or concatenated dumps — merge into one map.
-    """
-    result: dict[int, dict[str, int]] = {}
-    device: int | None = None
-    for line in text.splitlines():
-        header = _PROBE_HEADER_RE.match(line)
-        if header:
-            device = int(header.group(1), 16)
-            continue
-        row = _PROBE_ROW_RE.match(line)
-        if not row or device is None:
-            continue
-        label, base_s, count_s, hexstr = row.groups()
-        base, count = int(base_s), int(count_s)
-        if len(hexstr) != count * 4:
-            continue  # malformed row — skip rather than mis-slice
-        bank = result.setdefault(device, {})
-        for i in range(count):
-            bank[f"{label}({base + i})"] = int(hexstr[i * 4 : i * 4 + 4], 16)
-    return result
-
-
-def _caches_from_dump_map(
-    dump: dict[int, dict[str, int]],
-) -> dict[int, RegisterCache]:
-    return {addr: _deserialise_cache(data) for addr, data in dump.items()}
-
-
 def load_capture(path: Path) -> Plant:
     """Reconstruct a Plant from either an `export` JSON or a `probe --compact` dump.
 
@@ -299,9 +259,9 @@ def load_capture(path: Path) -> Plant:
         is_export = False
     if is_export:
         return load_plant(path)
-    dump = parse_probe_dump(text)
-    if dump:
-        return _build_plant(_caches_from_dump_map(dump), capabilities=None)
+    caches = parse_compact(text)
+    if caches:
+        return _build_plant(caches, capabilities=None)
     raise ValueError(f"not a recognised plant export or probe dump: {path}")
 
 
@@ -493,18 +453,28 @@ def _render_probe_compact(
     port: int,
     chunks: list[tuple[int, list[int]]],
 ) -> str:
-    """Render probe results as a compact, copy-paste-friendly hex dump (no table).
+    """Render probe results as the compact, copy-paste-friendly hex dump.
 
-    A leading ``#`` comment line carries the device/host context, then one line
-    per responding chunk in the form ``LABEL(base,count): <hex>`` — each register
-    is four hex chars, concatenated, so a 60-register chunk is 240 chars wide.
+    Delegates the register-cache serialisation to the modbus library's canonical
+    ``to_compact`` (device-inline rows ``0x<dev>:<BANK>(<base>,<count>) <hex>``),
+    and prepends one ``#`` provenance comment carrying host/port + probed range.
+    The provenance line is informational only — ``parse_compact`` ignores ``#``
+    comments — so a reporter can keep or strip it (e.g. to censor their IP)
+    without affecting the parse.
     """
-    header = f"# {reg_label} probe @ device 0x{device_address:02x} on {host}:{port}"
-    lines = [
-        f"{reg_label}({base},{len(values)}): " + "".join(f"{v:04x}" for v in values)
+    data = {
+        f"{reg_label}({base + i})": value
         for base, values in chunks
-    ]
-    return "\n".join([header, *lines])
+        for i, value in enumerate(values)
+    }
+    body = to_compact({device_address: _deserialise_cache(data)})
+    last = max((base + len(values) - 1 for base, values in chunks), default=0)
+    first = min((base for base, _ in chunks), default=0)
+    header = (
+        f"# givenergy-cli probe of device 0x{device_address:02x} "
+        f"({reg_label} {first}..{last}) on {host}:{port}"
+    )
+    return header + "\n" + body.rstrip("\n")
 
 
 def probe_registers(

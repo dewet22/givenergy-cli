@@ -74,9 +74,17 @@ Issues raw Modbus read requests, bypassing the normal capability-driven polling.
 | `--base` / `-b` | First register address (decimal or `0x`-hex) | required |
 | `--count` / `-n` | Number of registers to read | `60` |
 | `--device` / `-d` | Modbus device address, decimal or `0x`-hex (e.g. `0x11` inverter, `0x31` AC) | `0x11` |
-| `--compact` / `--terse` | Plain one-line-per-chunk hex dump instead of a table — easy to copy-paste, and loadable by [`shell`](#shell--interactive-python-shell-with-a-reconstructed-plant) / [`inspect`](#inspect--render-an-exported-plant) | off |
+| `--compact` / `--terse` | Plain hex dump instead of a table — easy to copy-paste, and loadable by [`shell`](#shell--interactive-python-shell-with-a-reconstructed-plant) / [`inspect`](#inspect--render-an-exported-plant) | off |
 
-Redirect a compact probe to a file (`probe … --compact > dump.txt`) and you have a register dump you can reconstruct a plant from — handy for new hardware that `export` can't yet `detect`.
+The compact form is the modbus library's canonical register-cache text serialisation (`to_compact`), one device-inline row per 60-register block:
+
+```
+# givenergy-cli probe of device 0x31 (HR 0..119) on 192.168.1.5:8899
+0x31:HR(0,60) 20010003…
+0x31:HR(60,60) …
+```
+
+The leading `#` line is informational only (host/port provenance) — strip it freely (e.g. to censor your IP) and the dump still parses, since each row carries its own device address. Redirect to a file (`probe … --compact > dump.txt`) and you have a register dump you can reconstruct a plant from — handy for new hardware that `export` can't yet `detect`.
 
 ### `export` — dump registers to a portable JSON file
 
