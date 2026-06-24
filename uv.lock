@@ -79,7 +79,7 @@ wheels = [
 
 [[package]]
 name = "givenergy-cli"
-version = "1.7.0"
+version = "1.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "givenergy-modbus" },

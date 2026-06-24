@@ -9,6 +9,13 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.7.1] - 2026-06-24
+
+### 🐛 Fixed
+
+- migrate off deprecated e_inverter_out_total accessor (#72) ([47227e4](https://github.com/dewet22/givenergy-cli/commit/47227e4f1060e3b123b860ffa89aea64c3bcd09b))
+- require givenergy-modbus >=2.5.5 for EMS managed-inverter serial disambiguation (#73) ([a262321](https://github.com/dewet22/givenergy-cli/commit/a2623215b9c730e4602e8646a49b4d93947be2bb))
+
 ## [1.7.0] - 2026-06-17
 
 ### 🔧 Maintenance
