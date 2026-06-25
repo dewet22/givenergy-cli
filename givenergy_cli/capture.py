@@ -12,6 +12,7 @@ from rich.console import Console
 from givenergy_modbus.client.client import Client
 from givenergy_modbus.exceptions import CommunicationError
 
+from givenergy_cli.features import client_kwargs
 from givenergy_cli.registers import _open_private, _silence_shutdown_noise
 
 # Tuning knobs — module-level so tests can shrink them.
@@ -78,7 +79,12 @@ def _marker(f: TextIO, message: str) -> None:
 
 
 async def _run(
-    host: str, port: int, output: Path, duration: float, reconnect_after: float
+    host: str,
+    port: int,
+    output: Path,
+    duration: float,
+    reconnect_after: float,
+    features: frozenset[str] = frozenset(),
 ) -> int:
     """Capture redacted frames for *duration* wall-clock seconds, reconnecting
     across drops and (when reconnect_after > 0) quiet stretches. All segments are
@@ -105,7 +111,7 @@ async def _run(
             if remaining <= 0:
                 break
 
-            client = Client(host=host, port=port)
+            client = Client(host=host, port=port, **client_kwargs(features))
             try:
                 await client.connect()
             except _CONNECT_ERRORS:
@@ -156,6 +162,7 @@ def capture_frames(
     output: Path,
     duration: float,
     reconnect_after: float = 60.0,
+    features: frozenset[str] = frozenset(),
 ) -> None:
     console = Console()
     console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
@@ -168,7 +175,9 @@ def capture_frames(
         f"Capturing redacted frames for {duration:g}s ({resilience}) → {output}"
     )
     with _silence_shutdown_noise():
-        count = asyncio.run(_run(host, port, output, duration, reconnect_after))
+        count = asyncio.run(
+            _run(host, port, output, duration, reconnect_after, features)
+        )
     # Redaction happens upstream per-frame; frames the library can't decode are
     # passed through untouched, so don't promise more than is guaranteed.
     console.print(

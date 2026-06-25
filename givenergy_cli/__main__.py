@@ -1,4 +1,5 @@
 import contextlib
+import os
 from enum import Enum
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from givenergy_modbus.model.plant import Plant
 
 from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
+from givenergy_cli.features import FEATURES, resolve_features
 from givenergy_cli.mock import serve_mock
 from givenergy_cli.registers import (
     _decode_batteries,
@@ -39,15 +41,27 @@ class LogLevel(str, Enum):
 
 app = typer.Typer(help="GivEnergy CLI — control your inverter from the terminal.")
 
+_ENABLE_HELP = (
+    "Enable an opt-in client feature (repeatable; comma-separated, or via "
+    "GIVENERGY_FEATURES). "
+    + (
+        "Available — " + "; ".join(f"{f.name}: {f.help}" for f in FEATURES.values())
+        if FEATURES
+        else "No opt-in features in this release."
+    )
+)
+
 
 @app.callback()
 def root(
     ctx: typer.Context,
     host: str = typer.Option(None, envvar="GIVENERGY_HOST"),
     port: int = typer.Option(8899, envvar="GIVENERGY_PORT"),
+    enable: list[str] = typer.Option([], "--enable", help=_ENABLE_HELP),
 ) -> None:
     """Global options shared by all subcommands."""
-    ctx.obj = {"host": host, "port": port}
+    features = resolve_features(enable, os.environ.get("GIVENERGY_FEATURES"))
+    ctx.obj = {"host": host, "port": port, "features": features}
 
 
 def _require_host(ctx: typer.Context) -> str:
@@ -85,6 +99,7 @@ def tui(
         log_level=log_level.value,
         redetect=redetect,
         allow_writes=allow_writes,
+        features=ctx.obj["features"],
     ).run()
 
 
@@ -111,6 +126,7 @@ def export(
         port=ctx.obj["port"],
         output=output,
         redact=redact,
+        features=ctx.obj["features"],
     )
 
 
@@ -152,6 +168,7 @@ def capture(
         output=output,
         duration=duration,
         reconnect_after=reconnect_after,
+        features=ctx.obj["features"],
     )
 
 
@@ -231,6 +248,7 @@ def probe(
         base=base,
         count=count,
         compact=compact,
+        features=ctx.obj["features"],
     )
 
 
@@ -334,7 +352,7 @@ def shell(
         host = _require_host(ctx)
         port = ctx.obj["port"]
         console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
-        plant, error = snapshot_plant(host, port)
+        plant, error = snapshot_plant(host, port, features=ctx.obj["features"])
         if error:
             console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
         if not any(plant.register_caches.values()):
