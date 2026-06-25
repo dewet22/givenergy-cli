@@ -232,7 +232,7 @@ def test_export_plant_redacts_serials(monkeypatch):
     plant.data_adapter_serial_number = "SA2205T123"
     plant.register_caches[0x11] = cache
 
-    async def _fake_capture(host: str, port: int):
+    async def _fake_capture(host: str, port: int, features=frozenset()):
         return plant, None
 
     monkeypatch.setattr("givenergy_cli.registers._capture", _fake_capture)
@@ -368,7 +368,9 @@ def test_shell_live_snapshots_via_seam(tmp_path, monkeypatch):
     dump = tmp_path / "d.txt"
     dump.write_text(_render_probe_compact("HR", 0x31, "h", 1, [(0, [1, 2, 3])]))
     fake = load_capture(dump)  # a plant with actual register data
-    monkeypatch.setattr(cli, "snapshot_plant", lambda host, port: (fake, None))
+    monkeypatch.setattr(
+        cli, "snapshot_plant", lambda host, port, features=frozenset(): (fake, None)
+    )
     captured = {}
     monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: captured.update(ns=ns))
     r = runner.invoke(cli.app, ["shell"], env={"GIVENERGY_HOST": "127.0.0.1"})
@@ -383,7 +385,10 @@ def test_shell_live_aborts_on_empty_capture(monkeypatch):
     monkeypatch.setattr(
         cli,
         "snapshot_plant",
-        lambda host, port: (Plant(), "connection failed: refused"),
+        lambda host, port, features=frozenset(): (
+            Plant(),
+            "connection failed: refused",
+        ),
     )
     opened = []
     monkeypatch.setattr(cli, "_start_shell", lambda ns, banner: opened.append(True))
@@ -466,7 +471,7 @@ def test_export_writes_owner_only_permissions(monkeypatch, tmp_path):
 
     plant = Plant()
 
-    async def _fake_capture(host: str, port: int):
+    async def _fake_capture(host: str, port: int, features=frozenset()):
         return plant, None
 
     monkeypatch.setattr("givenergy_cli.registers._capture", _fake_capture)

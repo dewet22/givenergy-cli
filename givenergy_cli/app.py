@@ -37,6 +37,7 @@ from givenergy_modbus.model.plant import Plant, PlantCapabilities
 
 from givenergy_cli import capabilities_cache
 from givenergy_cli.controls import ConfirmModal, ControlsPanel, Requests
+from givenergy_cli.features import client_kwargs
 from givenergy_cli.glance import IDLE_THRESHOLD, GlancePanel, TileRow
 from givenergy_cli.history import (
     EnergyCounters,
@@ -1029,13 +1030,14 @@ class GivEnergyApp(App):
         log_level: str = "WARNING",
         redetect: bool = False,
         allow_writes: bool = False,
+        features: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
         self._redetect = redetect
         self._allow_writes = allow_writes
-        self.client = Client(host=host, port=port)
+        self.client = Client(host=host, port=port, **client_kwargs(features))
         self.refresh_interval = refresh_interval
         self.log_level = getattr(logging, log_level.upper(), logging.WARNING)
         # 1 h of history at 15 s refresh — enough for short-window smoothing

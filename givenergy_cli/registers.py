@@ -32,6 +32,8 @@ from givenergy_modbus.model.register_cache import (
 )
 from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegistersRequest
 
+from givenergy_cli.features import client_kwargs
+
 
 def _battery_enum_register_constraints() -> dict[Register, set[int]]:
     """For each single-register enum-typed field on Battery, capture the set of
@@ -111,10 +113,12 @@ def _deserialise_cache(data: dict[str, int]) -> RegisterCache:
     return RegisterCache.from_json(json.dumps(data))
 
 
-async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
+async def _capture(
+    host: str, port: int, features: frozenset[str]
+) -> tuple[Plant, str | None]:
     """Connect, detect, load config, refresh; return (plant, error). On partial
     failure we still return whatever the plant captured up to that point."""
-    client = Client(host=host, port=port)
+    client = Client(host=host, port=port, **client_kwargs(features))
     error: str | None = None
     try:
         await client.connect()
@@ -143,16 +147,25 @@ async def _capture(host: str, port: int) -> tuple[Plant, str | None]:
     return client.plant, error
 
 
-def snapshot_plant(host: str, port: int) -> tuple[Plant, str | None]:
+def snapshot_plant(
+    host: str, port: int, features: frozenset[str] = frozenset()
+) -> tuple[Plant, str | None]:
     """Take a one-shot live snapshot — connect, capture, close. Returns (plant, error)."""
     with _silence_shutdown_noise():
-        return asyncio.run(_capture(host, port))
+        return asyncio.run(_capture(host, port, features))
 
 
-def export_plant(host: str, port: int, output: Path, *, redact: bool = True) -> None:
+def export_plant(
+    host: str,
+    port: int,
+    output: Path,
+    *,
+    redact: bool = True,
+    features: frozenset[str] = frozenset(),
+) -> None:
     console = Console()
     console.print(f"Connecting to [bold]{host}:{port}[/bold]…")
-    plant, error = snapshot_plant(host, port)
+    plant, error = snapshot_plant(host, port, features=features)
     if error:
         # Error strings can embed exception reprs wrapping network-derived bytes.
         console.print(f"[yellow]Warning:[/yellow] {escape(error)}")
@@ -485,6 +498,7 @@ def probe_registers(
     base: int,
     count: int,
     compact: bool = False,
+    features: frozenset[str] = frozenset(),
 ) -> None:
     """Issue a raw holding or input register read and print the results.
 
@@ -495,7 +509,16 @@ def probe_registers(
     """
     with _silence_shutdown_noise():
         asyncio.run(
-            _probe(host, port, register_type, device_address, base, count, compact)
+            _probe(
+                host,
+                port,
+                register_type,
+                device_address,
+                base,
+                count,
+                compact,
+                features,
+            )
         )
 
 
@@ -507,6 +530,7 @@ async def _probe(
     base: int,
     count: int,
     compact: bool = False,
+    features: frozenset[str] = frozenset(),
 ) -> None:
     console = Console()
     reg_label = "HR" if register_type == "hr" else "IR"
@@ -516,7 +540,7 @@ async def _probe(
         f"on [bold]{host}:{port}[/bold]…"
     )
 
-    client = Client(host=host, port=port)
+    client = Client(host=host, port=port, **client_kwargs(features))
     try:
         await client.connect()
     except Exception as exc:  # noqa: BLE001

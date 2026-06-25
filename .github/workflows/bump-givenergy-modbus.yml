@@ -1,10 +1,8 @@
 name: Bump givenergy-modbus
 
-# Triggered by a repository_dispatch event from dewet22/givenergy-modbus's
-# release workflow. Also exposed as workflow_dispatch for manual runs.
+# Manual bump of the givenergy-modbus pin. (The repository_dispatch auto-notify
+# from the modbus release workflow was retired upstream.)
 on:
-  repository_dispatch:
-    types: [givenergy-modbus-release]
   workflow_dispatch:
     inputs:
       version:
@@ -21,16 +19,14 @@ jobs:
       - name: Determine target version and base branch
         id: ver
         env:
-          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
-          MANUAL_VERSION: ${{ inputs.version }}
+          NEW: ${{ inputs.version }}
         run: |
-          NEW="${DISPATCH_VERSION:-$MANUAL_VERSION}"
           if [ -z "$NEW" ]; then
-            echo "::error::no version supplied via client_payload.version or workflow inputs"
+            echo "::error::no version supplied via workflow inputs"
             exit 1
           fi
-          # client_payload arrives from any token with write access — assert the
-          # shape once here rather than relying on downstream parsing to reject it.
+          # Assert the version shape once here rather than relying on downstream
+          # parsing to reject it.
           if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
             echo "::error::version '$NEW' does not look like a PEP 440 release (X.Y.Z with optional a/b/rc suffix)"
             exit 1
