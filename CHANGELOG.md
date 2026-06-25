@@ -9,6 +9,12 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.7.2] - 2026-06-25
+
+### ✨ Added
+
+- opt-in feature flags via --enable / GIVENERGY_FEATURES; bump modbus to >=2.5.11 (#74) ([d4feb07](https://github.com/dewet22/givenergy-cli/commit/d4feb07a97ec94e370819d885bee903903858e77))
+
 ## [1.7.1] - 2026-06-24
 
 ### 🐛 Fixed
