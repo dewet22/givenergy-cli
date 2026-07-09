@@ -351,6 +351,20 @@ def test_load_capture_derives_capabilities_from_identity_dump(tmp_path):
     assert plant.inverter.model is not None
 
 
+def test_load_capture_unknown_identity_falls_back(tmp_path):
+    """A probe dump whose identity register holds an unrecognised model code (new
+    hardware) falls back to a capability-less raw Plant rather than raising —
+    from_caches raises ValueError, not CommunicationError, for an unknown HR(0)."""
+    from givenergy_cli.registers import _render_probe_compact, load_capture
+
+    dump = tmp_path / "unknown.txt"
+    # HR(0)=0xffff at device 0x11: identity present but not a modelled device type.
+    dump.write_text(_render_probe_compact("HR", 0x11, "h", 1, [(0, [0xFFFF])]))
+    plant = load_capture(dump)
+    assert plant.capabilities is None
+    assert 0x11 in plant.register_caches
+
+
 def test_load_capture_reads_legacy_probe_dump(tmp_path):
     """Pre-2.4.0 dumps (old `# … probe @ device` header form) still load, via
     parse_compact's transitional legacy path — guards the format changeover."""

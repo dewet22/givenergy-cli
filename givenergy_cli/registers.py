@@ -38,6 +38,8 @@ from givenergy_modbus.pdu import ReadHoldingRegistersRequest, ReadInputRegisters
 
 from givenergy_cli.features import client_kwargs
 
+logger = logging.getLogger(__name__)
+
 
 def _battery_enum_register_constraints() -> dict[Register, set[int]]:
     """For each single-register enum-typed field on Battery, capture the set of
@@ -265,9 +267,10 @@ def load_capture(path: Path) -> Plant:
     The format is auto-detected. An export carries its own capabilities. A probe
     dump derives them offline via ``Plant.from_caches()`` (parity with live
     detect(), #268), so typed views (``.inverter``, ``.ems``, …) resolve — unless
-    the dump lacks the inverter identity register (a partial range probe of new
-    hardware), in which case it loads capability-less with raw registers only.
-    Raises ValueError if the file is neither.
+    capabilities can't be derived (no inverter identity register, or an
+    unrecognised/unmodelled device type — both new-hardware cases), in which case
+    it loads capability-less with raw registers only.
+    Raises ValueError if the file is neither export nor probe dump.
     """
     check_import_size(path)
     text = path.read_text(encoding="utf-8")
@@ -283,12 +286,13 @@ def load_capture(path: Path) -> Plant:
         try:
             # Derive full capabilities offline (parity with live detect(), #268).
             return Plant.from_caches(caches)
-        except CommunicationError:
-            # No inverter identity register (HR(0)@0x11) — e.g. a partial range
-            # probe of new hardware. Fall back to raw registers, the point there.
-            logging.getLogger(__name__).debug(
-                "capture %s lacks an identity register; capabilities not derived",
-                path,
+        except CommunicationError, ValueError:
+            # Can't derive capabilities from this dump — either no inverter identity
+            # register (HR(0)@0x11, CommunicationError) or an unrecognised model code
+            # (unmodelled new hardware, ValueError from from_caches). Both are
+            # new-hardware cases; fall back to raw registers, the point there.
+            logger.debug(
+                "capture %s: capabilities not derived; showing raw registers", path
             )
             return _build_plant(caches, capabilities=None)
     raise ValueError(f"not a recognised plant export or probe dump: {path}")
