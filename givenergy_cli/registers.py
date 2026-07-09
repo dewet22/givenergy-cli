@@ -260,7 +260,7 @@ def load_plant(path: Path) -> Plant:
 
 
 def load_capture(path: Path) -> Plant:
-    """Reconstruct a Plant from either an `export` JSON or a `probe --compact` dump.
+    """Reconstruct a Plant from either an `export` JSON or a `probe` dump.
 
     The format is auto-detected. An export carries its own capabilities. A probe
     dump derives them offline via ``Plant.from_caches()`` (parity with live

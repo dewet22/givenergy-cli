@@ -208,12 +208,20 @@ def probe(
         help="Modbus device address to target, decimal or 0x-hex "
         "(e.g. 0x11 for inverter, 0x31 for AC).",
     ),
+    visual: bool = typer.Option(
+        False,
+        "--visual",
+        help="Render the decoded register table instead of the default compact "
+        "one-line-per-register text (the compact form is easier to paste into a "
+        "bug report).",
+    ),
     compact: bool = typer.Option(
         False,
         "--compact",
         "--terse",
-        help="Print results as plain one-line-per-register text instead of a "
-        "table — easier to copy and paste into a bug report.",
+        hidden=True,
+        help="Deprecated no-op: compact output is now the default; use --visual "
+        "for the decoded table.",
     ),
 ) -> None:
     """Read an arbitrary register range directly from the inverter.
@@ -247,7 +255,7 @@ def probe(
         device_address=device_address,
         base=base,
         count=count,
-        compact=compact,
+        compact=not visual,
         features=ctx.obj["features"],
     )
 
@@ -259,7 +267,7 @@ def inspect(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="An `export` JSON file or a `probe --compact` dump.",
+        help="An `export` JSON file or a `probe` dump.",
     ),
 ) -> None:
     """Reconstruct a plant from an export JSON or probe dump and dump it."""
@@ -325,7 +333,7 @@ def shell(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="An `export` JSON or `probe --compact` dump to load offline. "
+        help="An `export` JSON or `probe` dump to load offline. "
         "Omit to snapshot a live inverter via --host.",
     ),
 ) -> None:
