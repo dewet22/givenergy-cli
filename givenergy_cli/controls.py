@@ -87,8 +87,8 @@ def charge_target_cmd(soc: int, caps: PlantCapabilities) -> Requests:
     if caps.is_ems:
         raise UnsupportedControl("charge target is set per-slot on EMS models")
     if caps.is_three_phase:
-        return commands.set_charge_target_3ph(soc)
-    return commands.set_charge_target(soc)
+        return commands.set_charge_target_enabled_3ph(soc)
+    return commands.set_charge_target_enabled(soc)
 
 
 def soc_reserve_cmd(val: int, caps: PlantCapabilities) -> Requests:

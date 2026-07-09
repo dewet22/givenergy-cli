@@ -139,10 +139,12 @@ class EnergyCounters:
             e_grid_in_total=inv.e_grid_in_total,
             e_grid_out_total=inv.e_grid_out_total,
             e_inverter_in_total=inv.e_inverter_in_total,
-            # Single-phase exposes PV-generation-total as e_pv_generation_total
-            # (IR45/46); three-phase keeps a genuine, distinct e_inverter_out_total
-            # (IR1362/3) and has no e_pv_generation_total. Prefer the new name,
-            # fall back to the deprecated alias only where it's the native field.
+            # Where cumulative inverter output lives is model-dependent:
+            # single-phase hybrids expose it as e_pv_generation_total (IR45/46);
+            # AC/All-in-One report None there since modbus 2.10.0, with the real
+            # value in e_inverter_out_total; three-phase has a distinct native
+            # e_inverter_out_total (IR1362/3) and no e_pv_generation_total. The
+            # None-aware _first_field picks whichever the model actually populates.
             e_inverter_out_total=_first_field(
                 inv, "e_pv_generation_total", "e_inverter_out_total"
             ),
