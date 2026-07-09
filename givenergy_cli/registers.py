@@ -14,7 +14,11 @@ from rich.markup import escape
 from rich.table import Table
 
 from givenergy_modbus.client.client import Client
-from givenergy_modbus.exceptions import RefreshFailed, RefreshPartiallySucceeded
+from givenergy_modbus.exceptions import (
+    CommunicationError,
+    RefreshFailed,
+    RefreshPartiallySucceeded,
+)
 from givenergy_modbus.model.register import Converter
 from givenergy_modbus.model.battery import Battery, BatteryRegisterGetter
 from givenergy_modbus.model.ems import Ems
@@ -258,10 +262,12 @@ def load_plant(path: Path) -> Plant:
 def load_capture(path: Path) -> Plant:
     """Reconstruct a Plant from either an `export` JSON or a `probe --compact` dump.
 
-    The format is auto-detected. Probe-sourced plants carry register caches but no
-    capabilities — the inverter model can't reliably be resolved offline, and for
-    new hardware the raw registers are the point — so typed views (``.inverter``,
-    ``.ems``, …) may be limited. Raises ValueError if the file is neither.
+    The format is auto-detected. An export carries its own capabilities. A probe
+    dump derives them offline via ``Plant.from_caches()`` (parity with live
+    detect(), #268), so typed views (``.inverter``, ``.ems``, …) resolve — unless
+    the dump lacks the inverter identity register (a partial range probe of new
+    hardware), in which case it loads capability-less with raw registers only.
+    Raises ValueError if the file is neither.
     """
     check_import_size(path)
     text = path.read_text(encoding="utf-8")
@@ -274,7 +280,17 @@ def load_capture(path: Path) -> Plant:
         return load_plant(path)
     caches = parse_compact(text)
     if caches:
-        return _build_plant(caches, capabilities=None)
+        try:
+            # Derive full capabilities offline (parity with live detect(), #268).
+            return Plant.from_caches(caches)
+        except CommunicationError:
+            # No inverter identity register (HR(0)@0x11) — e.g. a partial range
+            # probe of new hardware. Fall back to raw registers, the point there.
+            logging.getLogger(__name__).debug(
+                "capture %s lacks an identity register; capabilities not derived",
+                path,
+            )
+            return _build_plant(caches, capabilities=None)
     raise ValueError(f"not a recognised plant export or probe dump: {path}")
 
 
