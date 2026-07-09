@@ -365,6 +365,25 @@ def test_load_capture_unknown_identity_falls_back(tmp_path):
     assert 0x11 in plant.register_caches
 
 
+def test_inspect_skips_placeholder_meters(tmp_path, capsys):
+    """A capabilities-listed but unreachable meter (modbus 2.11.0 #213 all-None
+    placeholder) isn't rendered as an empty table by show_plant."""
+    from givenergy_cli.registers import _render_probe_compact, load_capture, show_plant
+
+    dump = tmp_path / "id.txt"
+    dump.write_text(_render_probe_compact("HR", 0x11, "h", 1, [(0, [0x2001])]))
+    plant = load_capture(dump)
+    # #213: caps lists meter 0x01 but there's no cache for it → an all-None placeholder.
+    plant.capabilities.meter_addresses = [0x01]
+    assert not plant.meters[0x01].is_valid()  # precondition
+
+    show_plant(plant)
+    out = capsys.readouterr().out
+    # The placeholder must not render as a data table (its address still legitimately
+    # appears in the capabilities summary — that's the listed-but-unreachable fact).
+    assert "Meter 0x01" not in out
+
+
 def test_load_capture_reads_legacy_probe_dump(tmp_path):
     """Pre-2.4.0 dumps (old `# … probe @ device` header form) still load, via
     parse_compact's transitional legacy path — guards the format changeover."""
