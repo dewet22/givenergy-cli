@@ -13,6 +13,23 @@ A command-line tool for monitoring and exporting data from GivEnergy inverters o
 - Python 3.14+
 - A GivEnergy inverter accessible on the local network
 
+## Supported hardware
+
+The CLI works with whatever `givenergy-modbus` can decode — the authoritative,
+evidence-based support matrix (validated vs modelled-but-unverified hardware) lives in
+the [`givenergy-modbus` documentation](https://github.com/dewet22/givenergy-modbus).
+Two CLI-specific caveats on top of it:
+
+- **Controls (writes) are single-phase inverters only.** Three-phase, EMS, and gateways
+  use different write paths that aren't implemented or hardware-tested, so they get a
+  read-only notice.
+- **The live `tui` is oriented around a single inverter's power flow.** Multi-inverter
+  gateway and EMS topologies decode fine but are best explored via `inspect` / `shell`,
+  which render every device the plant exposes.
+
+If you run hardware the matrix lists as unverified (single-phase Gen 2, Polar, Commercial
+AIO/EMS, three-phase AC), a `capture` from it would help confirm the decode.
+
 ## Installation
 
 ```bash
