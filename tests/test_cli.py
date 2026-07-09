@@ -69,8 +69,8 @@ def test_base_out_of_range():
     assert "between 0 and 65535" in r.output
 
 
-def test_probe_compact_default(monkeypatch):
-    """probe forwards compact=False by default."""
+def test_probe_compact_is_default(monkeypatch):
+    """probe forwards compact=True by default — compact is now the default view."""
     calls = []
     monkeypatch.setattr(cli, "probe_registers", lambda **kw: calls.append(kw))
     r = runner.invoke(
@@ -79,11 +79,25 @@ def test_probe_compact_default(monkeypatch):
         env={"GIVENERGY_HOST": "127.0.0.1"},
     )
     assert r.exit_code == 0, r.output
+    assert calls[0]["compact"] is True
+
+
+def test_probe_visual_flag(monkeypatch):
+    """--visual selects the decoded table view (compact=False)."""
+    calls = []
+    monkeypatch.setattr(cli, "probe_registers", lambda **kw: calls.append(kw))
+    r = runner.invoke(
+        cli.app,
+        ["probe", "--type", "hr", "--base", "10", "--visual"],
+        env={"GIVENERGY_HOST": "127.0.0.1"},
+    )
+    assert r.exit_code == 0, r.output
     assert calls[0]["compact"] is False
 
 
-def test_probe_compact_flag(monkeypatch):
-    """--compact and its --terse alias both forward compact=True."""
+def test_probe_deprecated_compact_terse_are_noops(monkeypatch):
+    """--compact and --terse stay accepted as deprecated no-ops: output remains
+    compact (the default), which is exactly what they always requested."""
     calls = []
     monkeypatch.setattr(cli, "probe_registers", lambda **kw: calls.append(kw))
     for flag in ("--compact", "--terse"):
