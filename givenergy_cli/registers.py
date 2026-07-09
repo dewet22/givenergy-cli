@@ -440,7 +440,9 @@ def show_plant(plant: Plant) -> None:
         console.rule(f"[bold green]Gateway ({kind})[/bold green]")
         console.print(_model_table(kind, gateway))
 
-    if meters := plant.meters:
+    # Skip capabilities-listed but unreachable meters — since modbus 2.11.0 (#213)
+    # plant.meters carries an all-None placeholder for every listed address.
+    if meters := {a: m for a, m in plant.meters.items() if m.is_valid()}:
         console.rule("[bold green]Meters[/bold green]")
         for addr, meter in sorted(meters.items()):
             console.print(_model_table(f"Meter 0x{addr:02x}", meter))
