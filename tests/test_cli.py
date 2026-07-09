@@ -309,7 +309,8 @@ def test_load_capture_reads_export_json(tmp_path):
 
 
 def test_load_capture_reads_probe_dump(tmp_path):
-    """A probe dump loads into a Plant: caches present, capabilities absent."""
+    """A probe dump with no identity register (device 0x31, not 0x11) falls back
+    to a capability-less Plant — raw caches present, capabilities absent."""
     from givenergy_cli.registers import _render_probe_compact, load_capture
 
     dump = tmp_path / "dump.txt"
@@ -318,6 +319,22 @@ def test_load_capture_reads_probe_dump(tmp_path):
     assert 0x31 in plant.register_caches
     assert len(plant.register_caches[0x31]) == 3
     assert plant.capabilities is None
+
+
+def test_load_capture_derives_capabilities_from_identity_dump(tmp_path):
+    """A probe dump carrying the inverter identity register (HR(0)@0x11) derives
+    full capabilities offline via modbus from_caches(), so typed views resolve."""
+    from givenergy_modbus.model.inverter import Model
+
+    from givenergy_cli.registers import _render_probe_compact, load_capture
+
+    dump = tmp_path / "identity.txt"
+    # HR(0)=0x2001 at device 0x11 is a hybrid device-type code (resolve_model).
+    dump.write_text(_render_probe_compact("HR", 0x11, "h", 1, [(0, [0x2001])]))
+    plant = load_capture(dump)
+    assert plant.capabilities is not None
+    assert plant.capabilities.device_type == Model.HYBRID_GEN1
+    assert plant.inverter.model is not None
 
 
 def test_load_capture_reads_legacy_probe_dump(tmp_path):
