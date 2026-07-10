@@ -9,6 +9,28 @@ generated at release time by `scripts/release.py generate`, which walks
 prefix. A per-commit `Changelog: <section>` or `Changelog: skip` git
 trailer overrides the automatic bucketing.
 
+## [1.8.0] - 2026-07-10
+
+### ✨ Added
+
+- derive capabilities from probe dumps via from_caches ([52413db](https://github.com/dewet22/givenergy-cli/commit/52413db75ce9c325a81c36ee017487e29d154d85))
+- default to compact output; add --visual for the decoded table ([db8fc07](https://github.com/dewet22/givenergy-cli/commit/db8fc0721c009618b1ab91d8ea24639359d9cb49))
+- add --spec and --sentinel seeding modes (#88) ([5ed2643](https://github.com/dewet22/givenergy-cli/commit/5ed2643825ac2aca9528f497f0af687834af75b6))
+
+### 🐛 Fixed
+
+- fall back to raw on unrecognised model code, not just missing identity ([1485d39](https://github.com/dewet22/givenergy-cli/commit/1485d39dd9959be63558a52c2630b3847ced7c92))
+
+### 🔧 Maintenance
+
+- pin givenergy-modbus ==2.10.3 (exact) + migrate deprecated setters ([9e44813](https://github.com/dewet22/givenergy-cli/commit/9e448133383965cebfb7cc921818dd6ae0e1d672))
+- spec for offline capability derivation from captures ([19fff6a](https://github.com/dewet22/givenergy-cli/commit/19fff6a48082c2f4d20dca64e977d69a7a2e3f85))
+- run the mypy hook under python3.14 so it type-checks registers.py ([fa25517](https://github.com/dewet22/givenergy-cli/commit/fa255174a1b4fc55b9eb5ae08567a5044c4823fb))
+- add a Supported hardware section ([c31151f](https://github.com/dewet22/givenergy-cli/commit/c31151fcc667d8189172e31191dd04577585ac81))
+- remove the givenergy-modbus bump workflow ([5f8e0b2](https://github.com/dewet22/givenergy-cli/commit/5f8e0b2e777b00beaa465f7dbadc7ad1c4e43459))
+- bump givenergy-modbus to 2.11.0; filter #213 meter placeholders (#85) ([9735534](https://github.com/dewet22/givenergy-cli/commit/9735534cc5c7c7ba5ad3a6908a559715385fe3f8))
+- bump givenergy-modbus to 2.11.1 (redactor fail-closed fix) (#87) ([149839d](https://github.com/dewet22/givenergy-cli/commit/149839d743ae7e9266d91c3ff4e6629bfb538dcd))
+
 ## [1.7.2] - 2026-06-25
 
 ### ✨ Added
