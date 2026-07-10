@@ -147,11 +147,11 @@ def serve_mock(
     except ValueError as exc:
         # from_spec's verify=True rejects synthetic state the client would refuse.
         Console().print(f"[red]Error:[/red] {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     try:
         asyncio.run(_serve(mock, bind, port))
     except KeyboardInterrupt:
         Console().print("\nMock plant stopped.")
     except OSError as exc:
         Console().print(f"\n[red]Error:[/red] Failed to start mock server: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
