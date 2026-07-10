@@ -90,6 +90,17 @@ def test_parse_spec_file_rejects_out_of_bounds(tmp_path, bad_spec):
         _parse_spec_file(p)
 
 
+def test_parse_spec_file_rejects_malformed_yaml(tmp_path):
+    """A syntactically broken spec surfaces a clean ValueError, not a raw
+    yaml.YAMLError (so the command shows a BadParameter, not a traceback)."""
+    from givenergy_cli.mock import _parse_spec_file
+
+    p = tmp_path / "bad.yaml"
+    p.write_text('"0x11": [')  # truncated flow sequence → yaml ParserError
+    with pytest.raises(ValueError):
+        _parse_spec_file(p)
+
+
 def test_build_mock_from_spec_seeds_device():
     """_build_mock routes a parsed spec through MockPlant.from_spec and seeds it."""
     from givenergy_modbus.model.register import HR

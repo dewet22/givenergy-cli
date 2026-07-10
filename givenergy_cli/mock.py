@@ -74,7 +74,10 @@ def _parse_spec_file(
     string, BANK one of HR/IR/MR, values plain integers. JSON is valid YAML, so
     one loader covers both formats.
     """
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"could not parse spec file as JSON/YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("spec must be a mapping of device -> {'BANK:base': [values]}")
     spec: dict[int, dict[tuple[type[Register], int], list[int]]] = {}

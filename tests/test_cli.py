@@ -169,6 +169,17 @@ def test_mock_server_spec_conflicts_with_capture():
     assert "--spec" in r.output
 
 
+def test_mock_server_spec_malformed_yaml_is_clean_error(tmp_path):
+    """A broken --spec file errors cleanly (BadParameter), not a raw yaml error."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('"0x11": [')
+    r = runner.invoke(
+        cli.app, ["mock-server", "--spec", str(bad)], env={"COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert "Invalid value" in r.output  # handled BadParameter, not a raw yaml error
+
+
 def test_mock_server_sentinel_requires_capture():
     """--sentinel overlays onto a --capture base, so --capture is required."""
     r = runner.invoke(
