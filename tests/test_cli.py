@@ -149,11 +149,84 @@ def test_render_probe_compact_not_folded_by_console():
     assert console.file.getvalue().count("\n") == 2
 
 
-def test_mock_server_requires_capture():
-    """--capture is mandatory."""
+def test_mock_server_requires_a_seeding_mode():
+    """mock-server needs at least one seeding mode (--capture or --spec)."""
     r = runner.invoke(cli.app, ["mock-server"], env={"COLUMNS": "200"})
     assert r.exit_code != 0
     assert "--capture" in r.output
+    assert "--spec" in r.output
+
+
+def test_mock_server_spec_conflicts_with_capture():
+    """--spec builds a mock on its own; it can't combine with --capture."""
+    seed = "tests/fixtures/two_batteries.json"
+    r = runner.invoke(
+        cli.app,
+        ["mock-server", "--spec", seed, "--capture", seed],
+        env={"COLUMNS": "200"},
+    )
+    assert r.exit_code != 0
+    assert "--spec" in r.output
+
+
+def test_mock_server_spec_malformed_yaml_is_clean_error(tmp_path):
+    """A broken --spec file errors cleanly (BadParameter), not a raw yaml error."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('"0x11": [')
+    r = runner.invoke(
+        cli.app, ["mock-server", "--spec", str(bad)], env={"COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert "Invalid value" in r.output  # handled BadParameter, not a raw yaml error
+
+
+def test_mock_server_sentinel_requires_capture():
+    """--sentinel overlays onto a --capture base, so --capture is required."""
+    r = runner.invoke(
+        cli.app, ["mock-server", "--sentinel", "0x11:HR:0-1"], env={"COLUMNS": "200"}
+    )
+    assert r.exit_code != 0
+    assert "--capture" in r.output
+
+
+def test_mock_server_spec_forwarded(monkeypatch, tmp_path):
+    """--spec parses the file and forwards the register spec to serve_mock."""
+    import json
+
+    from givenergy_modbus.model.register import HR
+
+    calls = []
+    monkeypatch.setattr(cli, "serve_mock", lambda **kw: calls.append(kw))
+    spec_file = tmp_path / "spec.json"
+    spec_file.write_text(json.dumps({"0x11": {"HR:0": [1, 2, 3]}}))
+    r = runner.invoke(cli.app, ["mock-server", "--spec", str(spec_file)])
+    assert r.exit_code == 0, r.output
+    assert calls[0]["spec"] == {0x11: {(HR, 0): [1, 2, 3]}}
+    assert calls[0]["captures"] == []
+
+
+def test_mock_server_sentinel_forwarded(monkeypatch):
+    """--capture + --sentinel forwards parsed sentinels and offset to serve_mock."""
+    from givenergy_modbus.model.register import HR
+
+    calls = []
+    monkeypatch.setattr(cli, "serve_mock", lambda **kw: calls.append(kw))
+    seed = "tests/fixtures/two_batteries.json"
+    r = runner.invoke(
+        cli.app,
+        [
+            "mock-server",
+            "--capture",
+            seed,
+            "--sentinel",
+            "0x11:HR:0-1",
+            "--offset",
+            "1000",
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert calls[0]["sentinels"] == [(0x11, HR, range(0, 2))]
+    assert calls[0]["offset"] == 1000
 
 
 def test_mock_server_missing_file():

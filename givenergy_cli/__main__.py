@@ -12,7 +12,7 @@ from givenergy_modbus.model.plant import Plant
 from givenergy_cli.app import GivEnergyApp
 from givenergy_cli.capture import capture_frames
 from givenergy_cli.features import FEATURES, resolve_features
-from givenergy_cli.mock import serve_mock
+from givenergy_cli.mock import _parse_sentinel, _parse_spec_file, serve_mock
 from givenergy_cli.registers import (
     _decode_batteries,
     check_import_size,
@@ -381,13 +381,34 @@ def shell(
 @app.command("mock-server")
 def mock_server(
     captures: list[Path] = typer.Option(
-        ...,
+        [],
         "--capture",
         "-c",
         exists=True,
         dir_okay=False,
         readable=True,
         help="Capture .log file(s) to seed from (repeatable). Produced by `capture`.",
+    ),
+    spec_file: Path | None = typer.Option(
+        None,
+        "--spec",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="JSON/YAML register spec to build a mock directly (no capture): maps "
+        "device to 'HR:base'/'IR:base'/'MR:base' to a list of ints. "
+        "Excludes --capture/--sentinel.",
+    ),
+    sentinels: list[str] = typer.Option(
+        [],
+        "--sentinel",
+        help="Overlay sentinel values on the --capture base (repeatable): "
+        "<device>:<bank>:<start>-<end>, e.g. 0x11:HR:0-119.",
+    ),
+    offset: int = typer.Option(
+        0,
+        "--offset",
+        help="Sentinel value offset (raw = address + offset); used with --sentinel.",
     ),
     bind: str = typer.Option(
         "127.0.0.1",
@@ -397,17 +418,37 @@ def mock_server(
     port: int = typer.Option(8899, "--port", help="Bind port."),
     log_level: LogLevel = typer.Option(LogLevel.INFO, envvar="GIVENERGY_LOG_LEVEL"),
 ) -> None:
-    """Serve a mock GivEnergy plant from recorded captures, for offline testing.
+    """Serve a mock GivEnergy plant for offline testing.
 
-    Replays one or more capture logs as a faithful in-memory plant that answers a
-    real client's detect/load_config/refresh sequence — point `tui` or `export` at
-    it with no hardware. Seed files come from the `capture` command.
+    Replays a faithful in-memory plant that answers a real client's
+    detect/load_config/refresh sequence — point `tui` or `export` at it with no
+    hardware. Three seeding modes:
+
+    - `--capture <log>` — replay recorded capture(s) (from the `capture` command).
+    - `--spec <file>` — build from a JSON/YAML register spec, no capture needed.
+    - `--sentinel <device>:<bank>:<start>-<end>` — overlay sentinel values on a
+      `--capture` base (for register identification).
 
     Example:
 
         givenergy-cli mock-server --capture plant.log
         givenergy-cli --host 127.0.0.1 tui   # in another terminal
     """
+    if spec_file is not None and (captures or sentinels):
+        raise typer.BadParameter(
+            "--spec builds a mock on its own — don't combine it with --capture or --sentinel.",
+            param_hint="'--spec'",
+        )
+    if sentinels and not captures:
+        raise typer.BadParameter(
+            "--sentinel overlays onto a --capture base; provide --capture too.",
+            param_hint="'--sentinel'",
+        )
+    if spec_file is None and not captures:
+        raise typer.BadParameter(
+            "provide a seeding mode: --capture <log> (optionally with --sentinel), or --spec <file>.",
+            param_hint="'--capture' / '--spec'",
+        )
     if not 0 <= port <= 65535:
         raise typer.BadParameter(
             f"Port must be between 0 and 65535; got {port}.",
@@ -418,7 +459,30 @@ def mock_server(
             check_import_size(capture_path)
         except ValueError as exc:
             raise typer.BadParameter(str(exc), param_hint="'--capture'") from exc
-    serve_mock(captures=captures, bind=bind, port=port, log_level=log_level.value)
+
+    spec = None
+    if spec_file is not None:
+        try:
+            check_import_size(spec_file)
+            spec = _parse_spec_file(spec_file)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="'--spec'") from exc
+    parsed_sentinels = None
+    if sentinels:
+        try:
+            parsed_sentinels = [_parse_sentinel(s) for s in sentinels]
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="'--sentinel'") from exc
+
+    serve_mock(
+        captures=captures,
+        bind=bind,
+        port=port,
+        log_level=log_level.value,
+        spec=spec,
+        sentinels=parsed_sentinels,
+        offset=offset,
+    )
 
 
 if __name__ == "__main__":
