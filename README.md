@@ -141,9 +141,14 @@ uv run givenergy-cli --host 127.0.0.1 tui
 
 Replays one or more `capture` logs as a faithful in-memory plant, answering a real client's `detect` / `load_config` / `refresh` sequence with synthesized, correct-CRC responses — so you can drive `tui`, `export`, or `probe` against it with no hardware. Reads of an absent register bank return the same error shape real hardware uses. Seed files come from the [`capture`](#capture--record-wire-frames-for-a-bug-report) command.
 
+Two further seeding modes exist for register-interrogation work: `--spec <file>` builds a mock from a pure JSON/YAML register spec with no capture, and `--sentinel <device>:<bank>:<start>-<end>` overlays sentinel values on a `--capture` base. Exactly one of `--capture` or `--spec` is required.
+
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--capture` / `-c` | Capture `.log` file(s) to seed from (repeatable) | required |
+| `--capture` / `-c` | Capture `.log` file(s) to seed from (repeatable) | — |
+| `--spec` | JSON/YAML register spec to build a mock directly (no capture) | — |
+| `--sentinel` | Overlay sentinel values on the `--capture` base (repeatable): `<device>:<bank>:<start>-<end>` | — |
+| `--offset` | Sentinel value offset, used with `--sentinel` | `0` |
 | `--bind` | Bind address (use `0.0.0.0` to expose on the LAN) | `127.0.0.1` |
 | `--port` | Bind port | `8899` |
 
