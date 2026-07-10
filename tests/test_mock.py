@@ -27,7 +27,15 @@ def test_parse_sentinel_decimal_device_and_lowercase_bank():
 
 @pytest.mark.parametrize(
     "bad",
-    ["0x11:HR", "0x11:HR:0", "0x11:XX:0-1", "0x11:HR:5-1", "bogus"],
+    [
+        "0x11:HR",
+        "0x11:HR:0",
+        "0x11:XX:0-1",
+        "0x11:HR:5-1",
+        "bogus",
+        "0x100:HR:0-1",  # device address > 0xff
+        "0x11:HR:0-70000",  # register address > 0xffff
+    ],
 )
 def test_parse_sentinel_rejects_malformed(bad):
     from givenergy_cli.mock import _parse_sentinel
@@ -62,6 +70,22 @@ def test_parse_spec_file_rejects_non_int_values(tmp_path, bad_values):
 
     p = tmp_path / "spec.json"
     p.write_text(json.dumps({"0x11": {"HR:0": bad_values}}))
+    with pytest.raises(ValueError):
+        _parse_spec_file(p)
+
+
+@pytest.mark.parametrize(
+    "bad_spec",
+    [
+        {"0x100": {"HR:0": [1]}},  # device address > 0xff
+        {"0x11": {"HR:0x10000": [1]}},  # base register > 0xffff
+    ],
+)
+def test_parse_spec_file_rejects_out_of_bounds(tmp_path, bad_spec):
+    from givenergy_cli.mock import _parse_spec_file
+
+    p = tmp_path / "spec.json"
+    p.write_text(json.dumps(bad_spec))
     with pytest.raises(ValueError):
         _parse_spec_file(p)
 

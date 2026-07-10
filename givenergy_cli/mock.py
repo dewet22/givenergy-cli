@@ -33,6 +33,18 @@ def _bank(token: str) -> type[Register]:
         ) from None
 
 
+def _check_device(dev: int) -> int:
+    if not 0 <= dev <= 0xFF:
+        raise ValueError(f"device address must be 0..255 (0xff); got {dev}")
+    return dev
+
+
+def _check_register(addr: int) -> int:
+    if not 0 <= addr <= 0xFFFF:
+        raise ValueError(f"register address must be 0..65535 (0xffff); got {addr}")
+    return addr
+
+
 def _parse_sentinel(text: str) -> tuple[int, type[Register], range]:
     """Parse a ``device:bank:start-end`` sentinel spec into
     ``(device_address, register_class, range(start, end + 1))``."""
@@ -46,10 +58,11 @@ def _parse_sentinel(text: str) -> tuple[int, type[Register], range]:
     start_s, sep, end_s = span_s.partition("-")
     if not sep:
         raise ValueError(f"sentinel range {span_s!r} must be 'start-end'")
-    start, end = _to_int(start_s), _to_int(end_s)
+    start = _check_register(_to_int(start_s))
+    end = _check_register(_to_int(end_s))
     if end < start:
         raise ValueError(f"sentinel range end {end} is before start {start}")
-    return _to_int(dev_s), _bank(bank_s), range(start, end + 1)
+    return _check_device(_to_int(dev_s)), _bank(bank_s), range(start, end + 1)
 
 
 def _parse_spec_file(
@@ -70,14 +83,16 @@ def _parse_spec_file(
             raise ValueError(
                 f"device {dev_key!r} must map to {{'BANK:base': [values]}}"
             )
-        dev = _to_int(dev_key)
+        dev = _check_device(_to_int(dev_key))
         for bank_key, values in banks.items():
             bank_s, sep, base_s = str(bank_key).partition(":")
             if not sep:
                 raise ValueError(f"register key {bank_key!r} must be 'BANK:base'")
             if not isinstance(values, list):
                 raise ValueError(f"values for {bank_key!r} must be a list of integers")
-            spec.setdefault(dev, {})[(_bank(bank_s), _to_int(base_s))] = [
+            base = _check_register(_to_int(base_s))
+            # Register values are left to from_spec's verify=True (rejects non-uint16).
+            spec.setdefault(dev, {})[(_bank(bank_s), base)] = [
                 _to_int(v) for v in values
             ]
     return spec
